@@ -8,10 +8,13 @@ const { chromium } = require('playwright');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy - Required for rate limiting behind proxies (like Render)
+app.set('trust proxy', 1);
+
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -43,12 +46,14 @@ setInterval(() => {
       const filepath = path.join(DOWNLOAD_DIR, file);
       try {
         const stats = fs.statSync(filepath);
-        if (now - stats.mtimeMs > 3600000) {
+        if (now - stats.mtimeMs > 3600000) { // 1 hour
           fs.unlinkSync(filepath);
           deletedCount++;
           console.log(`🗑️ Deleted old file: ${file}`);
         }
-      } catch (err) {}
+      } catch (err) {
+        // File might have been deleted already
+      }
     });
     if (deletedCount > 0) {
       console.log(`🧹 Cleaned up ${deletedCount} old files`);
@@ -56,7 +61,7 @@ setInterval(() => {
   } catch (error) {
     console.error('Cleanup error:', error.message);
   }
-}, 3600000);
+}, 3600000); // Run every hour
 
 // Store active browser instance
 let browser = null;
@@ -158,6 +163,7 @@ async function handleAds(page) {
     let adClosed = false;
     
     const adCloseMethods = [
+      // Method 1: Role-based close button
       async () => {
         try {
           const closeBtn = page.getByRole('button', { name: 'Close' });
@@ -169,6 +175,7 @@ async function handleAds(page) {
         } catch {}
         return false;
       },
+      // Method 2: Text-based close button
       async () => {
         try {
           const closeBtn = page.locator('button:has-text("Close"), button:has-text("close"), button:has-text("×"), button:has-text("X")');
@@ -180,6 +187,7 @@ async function handleAds(page) {
         } catch {}
         return false;
       },
+      // Method 3: Click outside ad
       async () => {
         try {
           const adContent = page.locator('#ad-content, .ad-container, [class*="ad-"], [id*="ad-"]');
@@ -191,6 +199,7 @@ async function handleAds(page) {
         } catch {}
         return false;
       },
+      // Method 4: ESC key
       async () => {
         try {
           await page.keyboard.press('Escape');
@@ -208,7 +217,9 @@ async function handleAds(page) {
           await page.waitForTimeout(1000);
           break;
         }
-      } catch (error) {}
+      } catch (error) {
+        // Continue to next method
+      }
     }
 
     if (!adClosed) {
@@ -235,6 +246,7 @@ async function downloadVideo(instagramUrl) {
     await page.setViewportSize({ width: 1366, height: 768 });
     page.setDefaultTimeout(30000);
 
+    // Navigate to snapsave.app
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
@@ -242,20 +254,25 @@ async function downloadVideo(instagramUrl) {
     });
     await page.waitForTimeout(2000);
 
+    // Handle initial ads
     await handleAds(page);
 
+    // Enter URL
     console.log('✏️ Entering URL...');
     const urlInput = page.getByRole('textbox', { name: 'Url' });
     await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
 
+    // Click download button
     console.log('🔄 Clicking download button...');
     const downloadBtn = page.getByRole('button', { name: 'Download' });
     await downloadBtn.click();
     await page.waitForTimeout(3000);
 
+    // Handle ads after click
     await handleAds(page);
 
+    // Wait for download link
     console.log('⏳ Waiting for download link...');
     
     const downloadLinkSelectors = [
@@ -269,7 +286,9 @@ async function downloadVideo(instagramUrl) {
     
     let downloadLink = null;
     let usedSelector = null;
+    let rapidCdnUrl = null;
     
+    // First try to find the link with rapidcdn in href
     for (const selector of downloadLinkSelectors) {
       try {
         const element = page.locator(selector).first();
@@ -277,45 +296,80 @@ async function downloadVideo(instagramUrl) {
           downloadLink = element;
           usedSelector = selector;
           console.log(`✅ Found download link using selector: ${selector}`);
-          break;
-        }
-      } catch {}
-    }
-
-    if (!downloadLink) {
-      try {
-        const allLinks = await page.locator('a').all();
-        for (const link of allLinks) {
-          const href = await link.getAttribute('href');
-          if (href && (href.includes('rapidcdn') || href.includes('download'))) {
-            downloadLink = link;
-            usedSelector = 'generic link search';
-            console.log('✅ Found download link via generic search');
+          
+          // Get the href which contains the rapidcdn URL
+          const href = await downloadLink.getAttribute('href');
+          if (href && href.includes('rapidcdn')) {
+            rapidCdnUrl = href;
+            console.log('✅ Found rapidcdn URL in href');
             break;
           }
         }
       } catch {}
     }
 
+    // If we didn't find it with the selectors, try a more generic approach
     if (!downloadLink) {
-      throw new Error('Download link not found after multiple attempts');
+      try {
+        const allLinks = await page.locator('a').all();
+        for (const link of allLinks) {
+          const href = await link.getAttribute('href');
+          if (href && href.includes('rapidcdn')) {
+            downloadLink = link;
+            rapidCdnUrl = href;
+            usedSelector = 'generic link search';
+            console.log('✅ Found rapidcdn URL via generic search');
+            break;
+          }
+        }
+      } catch {}
     }
 
-    let downloadUrl = await downloadLink.getAttribute('href');
-    if (!downloadUrl) {
-      throw new Error('Download URL not found');
+    // If still no link, try to get URL from onclick attribute
+    if (!rapidCdnUrl && downloadLink) {
+      try {
+        const onclickAttr = await downloadLink.getAttribute('onclick');
+        if (onclickAttr) {
+          const urlMatch = onclickAttr.match(/https?:\/\/[^"']+/);
+          if (urlMatch) {
+            rapidCdnUrl = urlMatch[0];
+            console.log('✅ Found rapidcdn URL in onclick attribute');
+          }
+        }
+      } catch {}
     }
 
-    console.log('✅ Download URL found');
+    // If still no URL, try to find any link with rapidcdn in the page
+    if (!rapidCdnUrl) {
+      try {
+        const rapidLinks = await page.locator('a[href*="rapidcdn"]').all();
+        for (const link of rapidLinks) {
+          const href = await link.getAttribute('href');
+          if (href && href.includes('rapidcdn')) {
+            rapidCdnUrl = href;
+            console.log('✅ Found rapidcdn URL via direct link search');
+            break;
+          }
+        }
+      } catch {}
+    }
 
+    if (!rapidCdnUrl) {
+      throw new Error('Could not find rapidcdn download URL');
+    }
+
+    console.log('✅ RapidCDN URL found');
+
+    // Get suggested filename from the URL
     let filename = 'video.mp4';
     try {
-      const filenameMatch = downloadUrl.match(/filename=([^&]+)/);
+      const filenameMatch = rapidCdnUrl.match(/filename=([^&]+)/);
       if (filenameMatch) {
         filename = decodeURIComponent(filenameMatch[1]);
       }
     } catch {}
 
+    // Clean filename
     filename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
     if (!filename.endsWith('.mp4')) {
       filename = `video_${Date.now()}.mp4`;
@@ -323,19 +377,17 @@ async function downloadVideo(instagramUrl) {
 
     const filepath = path.join(DOWNLOAD_DIR, filename);
 
-    console.log(`📥 Downloading video to: ${filename}`);
+    // Download the video using the rapidcdn URL
+    console.log(`📥 Downloading video from rapidcdn...`);
     
-    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
-
-    console.log('🖱️ Clicking download link...');
-    await downloadLink.click();
-
-    console.log('⏳ Waiting for download to start...');
-    const download = await downloadPromise;
-    console.log('✅ Download started!');
-
-    console.log('💾 Saving file...');
-    await download.saveAs(filepath);
+    // Use fetch to download the video
+    const response = await fetch(rapidCdnUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const buffer = Buffer.from(await response.arrayBuffer());
+    fs.writeFileSync(filepath, buffer);
 
     const stats = fs.statSync(filepath);
     const fileSizeMB = stats.size / (1024 * 1024);
@@ -343,15 +395,17 @@ async function downloadVideo(instagramUrl) {
 
     console.log(`✅ Video downloaded: ${filename} (${fileSizeMB.toFixed(2)} MB) in ${downloadTime}s`);
 
-    const fileUrl = `/downloads/${filename}`;
-
+    // Return the rapidcdn URL directly
     return {
       success: true,
       filename: filename,
-      downloadUrl: fileUrl,
+      downloadUrl: rapidCdnUrl,  // This is the rapidcdn URL
+      directDownloadUrl: rapidCdnUrl,
       fileSize: `${fileSizeMB.toFixed(2)} MB`,
       downloadTime: `${downloadTime}s`,
-      originalUrl: instagramUrl
+      originalUrl: instagramUrl,
+      isDirectUrl: true,
+      localPath: filepath
     };
 
   } catch (error) {
@@ -377,6 +431,7 @@ app.post('/api/download', async (req, res) => {
       });
     }
 
+    // Validate Instagram URL
     if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
       return res.status(400).json({ 
         success: false,
@@ -408,7 +463,7 @@ app.post('/api/download', async (req, res) => {
 // Serve downloaded files
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
-// IMPORTANT: Serve the frontend for the root route
+// Serve frontend
 app.get('/', (req, res) => {
   const indexPath = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(indexPath)) {
@@ -451,9 +506,10 @@ app.get('/', (req, res) => {
                 if (data.success) {
                   resultDiv.innerHTML = \`
                     ✅ Download ready!<br>
-                    <a href="\${data.data.downloadUrl}" download>Download Video</a><br>
+                    <a href="\${data.data.downloadUrl}" target="_blank">Download Video</a><br>
                     Size: \${data.data.fileSize}<br>
-                    Filename: \${data.data.filename}
+                    Filename: \${data.data.filename}<br>
+                    <button onclick="navigator.clipboard.writeText('\${data.data.downloadUrl}')">Copy URL</button>
                   \`;
                 } else {
                   resultDiv.innerHTML = '❌ Error: ' + data.error;
@@ -528,8 +584,11 @@ process.on('SIGINT', async () => {
     try {
       await browser.close();
       console.log('🔒 Browser closed');
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error closing browser:', e.message);
+    }
   }
+  console.log('👋 Goodbye!');
   process.exit(0);
 });
 
@@ -539,11 +598,15 @@ process.on('SIGTERM', async () => {
     try {
       await browser.close();
       console.log('🔒 Browser closed');
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error closing browser:', e.message);
+    }
   }
+  console.log('👋 Goodbye!');
   process.exit(0);
 });
 
+// Unhandled rejection handler
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
