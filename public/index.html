@@ -4,90 +4,565 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Instagram Video Downloader</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 600px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        input {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            border-color: #667eea;
+        }
+        
+        button {
+            padding: 14px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #c33;
+            display: none;
+        }
+        
+        .result {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 20px;
+            border: 2px solid #e9ecef;
+            display: none;
+        }
+        
+        .result.success {
+            border-color: #28a745;
+        }
+        
+        .result h3 {
+            color: #28a745;
+            margin-bottom: 15px;
+        }
+        
+        .result .info {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 10px 0 20px 0;
+        }
+        
+        .result .info div {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .result .info div:last-child {
+            border-bottom: none;
+        }
+        
+        .result .label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .result .value {
+            color: #333;
+            float: right;
+            max-width: 60%;
+            word-break: break-all;
+        }
+        
+        .result .value.url-value {
+            color: #667eea;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .result .value.url-value:hover {
+            text-decoration: underline;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .button-group .btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            text-decoration: none;
+        }
+        
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-download:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(40, 167, 69, 0.3);
+        }
+        
+        .btn-copy {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-copy:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-copy.copied {
+            background: #28a745;
+        }
+        
+        .btn-reset {
+            background: #6c757d;
+            color: white;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .btn-reset:hover {
+            background: #5a6268;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .feature {
+            text-align: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .feature span {
+            display: block;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 1000;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        .url-box {
+            background: #f0f0f0;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin: 10px 0;
+            font-size: 12px;
+            word-break: break-all;
+            color: #555;
+            border: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .url-box .url-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .url-box .copy-small {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        
+        .url-box .copy-small:hover {
+            background: #5a67d8;
+        }
+        
+        @media (max-width: 600px) {
+            .card { padding: 20px; }
+            .input-group { flex-direction: column; }
+            button { width: 100%; }
+            .features { grid-template-columns: 1fr; }
+            .button-group { flex-direction: column; }
+            .result .value { float: none; display: block; max-width: 100%; }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <div class="logo">📱</div>
-            <h1>Instagram Video Downloader</h1>
+        <div class="card">
+            <h1>📱 Instagram Video Downloader</h1>
             <p class="subtitle">Download any Instagram video in seconds</p>
-        </header>
-
-        <div class="main-card">
-            <div class="input-section">
-                <div class="input-wrapper">
-                    <input 
-                        type="url" 
-                        id="urlInput" 
-                        placeholder="Paste Instagram video URL here..."
-                        autocomplete="off"
-                    >
-                    <button id="downloadBtn" onclick="handleDownload()">
-                        <span class="btn-text">Download</span>
-                        <span class="btn-loader" style="display: none;">⏳</span>
-                    </button>
-                </div>
-                <div class="url-hint">
-                    <span>Example: https://www.instagram.com/p/ABC123/</span>
-                </div>
-            </div>
-
-            <div id="errorMessage" class="error-message" style="display: none;"></div>
             
-            <div id="resultSection" class="result-section" style="display: none;">
-                <div class="result-card">
-                    <div class="result-header">
-                        <span class="success-icon">✅</span>
-                        <h3>Download Ready!</h3>
-                    </div>
-                    <div class="result-info">
-                        <div class="info-row">
-                            <span class="label">Filename:</span>
-                            <span id="filename" class="value"></span>
-                        </div>
-                        <div class="info-row">
-                            <span class="label">File Size:</span>
-                            <span id="fileSize" class="value"></span>
-                        </div>
-                    </div>
-                    <div class="download-actions">
-                        <a id="downloadLink" href="#" class="btn-download" download>
-                            ⬇️ Download Video
-                        </a>
-                        <button onclick="resetForm()" class="btn-reset">
-                            🔄 New Download
-                        </button>
-                    </div>
-                </div>
+            <div class="input-group">
+                <input 
+                    type="url" 
+                    id="urlInput" 
+                    placeholder="Paste Instagram video URL here..."
+                    autocomplete="off"
+                >
+                <button id="downloadBtn" onclick="handleDownload()">
+                    Download
+                </button>
             </div>
-
+            
+            <div id="errorMessage" class="error"></div>
+            
+            <div id="resultSection" class="result">
+                <h3>✅ Download Ready!</h3>
+                <div class="info">
+                    <div><span class="label">Filename:</span> <span id="filename" class="value"></span></div>
+                    <div><span class="label">File Size:</span> <span id="fileSize" class="value"></span></div>
+                    <div><span class="label">Download Time:</span> <span id="downloadTime" class="value"></span></div>
+                    <div>
+                        <span class="label">Download URL:</span>
+                        <span id="downloadUrlDisplay" class="value url-value" onclick="copyUrl()" title="Click to copy">
+                            Click to copy
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="url-box">
+                    <span class="url-text" id="urlText">Loading URL...</span>
+                    <button class="copy-small" onclick="copyUrl()">📋 Copy</button>
+                </div>
+                
+                <div class="button-group">
+                    <a id="downloadLink" href="#" class="btn btn-download" download>⬇️ Download Video</a>
+                    <button class="btn btn-copy" onclick="copyUrl()">📋 Copy URL</button>
+                </div>
+                
+                <button class="btn-reset" onclick="resetForm()">🔄 New Download</button>
+            </div>
+            
             <div class="features">
-                <div class="feature-item">
+                <div class="feature">
                     <span>🚀</span>
-                    <span>Fast downloads</span>
+                    Fast downloads
                 </div>
-                <div class="feature-item">
+                <div class="feature">
                     <span>🎯</span>
-                    <span>No registration</span>
+                    No registration
                 </div>
-                <div class="feature-item">
+                <div class="feature">
                     <span>🔒</span>
-                    <span>Secure & private</span>
+                    Secure & private
                 </div>
-                <div class="feature-item">
+                <div class="feature">
                     <span>📱</span>
-                    <span>Works with any Instagram video</span>
+                    Works with any Instagram video
                 </div>
             </div>
         </div>
-
-        <footer>
-            <p>Powered by snapsave.app • Free Instagram video downloader</p>
-        </footer>
     </div>
 
-    <script src="script.js"></script>
+    <!-- Toast notification -->
+    <div id="toast" class="toast">✅ Copied to clipboard!</div>
+
+    <script>
+        let currentDownloadUrl = '';
+
+        async function handleDownload() {
+            const urlInput = document.getElementById('urlInput');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const errorDiv = document.getElementById('errorMessage');
+            const resultSection = document.getElementById('resultSection');
+            
+            const url = urlInput.value.trim();
+            
+            if (!url) {
+                showError('Please enter an Instagram video URL');
+                return;
+            }
+            
+            if (!url.includes('instagram.com')) {
+                showError('Please enter a valid Instagram URL');
+                return;
+            }
+
+            downloadBtn.disabled = true;
+            downloadBtn.innerHTML = '⏳ Downloading...';
+            hideError();
+            resultSection.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Download failed');
+                }
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Download failed');
+                }
+
+                showResult(data.data);
+
+            } catch (error) {
+                showError(error.message || 'Failed to download video. Please try again.');
+            } finally {
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = 'Download';
+            }
+        }
+
+        function showResult(data) {
+            const resultSection = document.getElementById('resultSection');
+            const filename = document.getElementById('filename');
+            const fileSize = document.getElementById('fileSize');
+            const downloadTime = document.getElementById('downloadTime');
+            const downloadLink = document.getElementById('downloadLink');
+            const downloadUrlDisplay = document.getElementById('downloadUrlDisplay');
+            const urlText = document.getElementById('urlText');
+
+            // Build the full URL
+            const fullUrl = window.location.origin + data.downloadUrl;
+            currentDownloadUrl = fullUrl;
+
+            filename.textContent = data.filename;
+            fileSize.textContent = data.fileSize;
+            downloadTime.textContent = data.downloadTime || 'N/A';
+            downloadLink.href = data.downloadUrl;
+            downloadUrlDisplay.textContent = fullUrl;
+            urlText.textContent = fullUrl;
+            
+            resultSection.style.display = 'block';
+            resultSection.classList.add('success');
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function copyUrl() {
+            if (!currentDownloadUrl) {
+                showToast('No URL to copy yet!');
+                return;
+            }
+
+            // Try using the modern Clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(currentDownloadUrl)
+                    .then(() => {
+                        showToast('✅ Download URL copied to clipboard!');
+                        // Change button color temporarily
+                        const copyBtn = document.querySelector('.btn-copy');
+                        if (copyBtn) {
+                            copyBtn.classList.add('copied');
+                            copyBtn.textContent = '✅ Copied!';
+                            setTimeout(() => {
+                                copyBtn.classList.remove('copied');
+                                copyBtn.textContent = '📋 Copy URL';
+                            }, 2000);
+                        }
+                    })
+                    .catch(() => {
+                        // Fallback method
+                        fallbackCopy(currentDownloadUrl);
+                    });
+            } else {
+                // Fallback for older browsers
+                fallbackCopy(currentDownloadUrl);
+            }
+        }
+
+        function fallbackCopy(text) {
+            // Create a temporary input element
+            const input = document.createElement('input');
+            input.value = text;
+            document.body.appendChild(input);
+            input.select();
+            
+            try {
+                document.execCommand('copy');
+                showToast('✅ Download URL copied to clipboard!');
+                // Change button color temporarily
+                const copyBtn = document.querySelector('.btn-copy');
+                if (copyBtn) {
+                    copyBtn.classList.add('copied');
+                    copyBtn.textContent = '✅ Copied!';
+                    setTimeout(() => {
+                        copyBtn.classList.remove('copied');
+                        copyBtn.textContent = '📋 Copy URL';
+                    }, 2000);
+                }
+            } catch (err) {
+                showToast('❌ Failed to copy. Please select and copy manually.');
+            }
+            
+            document.body.removeChild(input);
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            
+            clearTimeout(toast.timeout);
+            toast.timeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.style.display = 'none';
+        }
+
+        function resetForm() {
+            const urlInput = document.getElementById('urlInput');
+            const resultSection = document.getElementById('resultSection');
+            const errorDiv = document.getElementById('errorMessage');
+            
+            urlInput.value = '';
+            resultSection.style.display = 'none';
+            errorDiv.style.display = 'none';
+            currentDownloadUrl = '';
+            urlInput.focus();
+        }
+
+        // Enter key support
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleDownload();
+            }
+        });
+
+        // Auto-focus on load
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('urlInput').focus();
+        });
+    </script>
 </body>
 </html>
