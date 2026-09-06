@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Video Downloader</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">📱</div>
+            <h1>Instagram Video Downloader</h1>
+            <p class="subtitle">Download any Instagram video in seconds</p>
+        </header>
+
+        <div class="main-card">
+            <div class="input-section">
+                <div class="input-wrapper">
+                    <input 
+                        type="url" 
+                        id="urlInput" 
+                        placeholder="Paste Instagram video URL here..."
+                        autocomplete="off"
+                    >
+                    <button id="downloadBtn" onclick="handleDownload()">
+                        <span class="btn-text">Download</span>
+                        <span class="btn-loader" style="display: none;">⏳</span>
+                    </button>
+                </div>
+                <div class="url-hint">
+                    <span>Example: https://www.instagram.com/p/ABC123/</span>
+                </div>
+            </div>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+            
+            <div id="resultSection" class="result-section" style="display: none;">
+                <div class="result-card">
+                    <div class="result-header">
+                        <span class="success-icon">✅</span>
+                        <h3>Download Ready!</h3>
+                    </div>
+                    <div class="result-info">
+                        <div class="info-row">
+                            <span class="label">Filename:</span>
+                            <span id="filename" class="value"></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">File Size:</span>
+                            <span id="fileSize" class="value"></span>
+                        </div>
+                    </div>
+                    <div class="download-actions">
+                        <a id="downloadLink" href="#" class="btn-download" download>
+                            ⬇️ Download Video
+                        </a>
+                        <button onclick="resetForm()" class="btn-reset">
+                            🔄 New Download
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="feature-item">
+                    <span>🚀</span>
+                    <span>Fast downloads</span>
+                </div>
+                <div class="feature-item">
+                    <span>🎯</span>
+                    <span>No registration</span>
+                </div>
+                <div class="feature-item">
+                    <span>🔒</span>
+                    <span>Secure & private</span>
+                </div>
+                <div class="feature-item">
+                    <span>📱</span>
+                    <span>Works with any Instagram video</span>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Powered by snapsave.app • Free Instagram video downloader</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

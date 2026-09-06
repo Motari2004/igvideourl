@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: instagram-downloader
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npx playwright install chromium
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+    buildFilter:
+      paths:
+      - package.json
+      - server.js
+      - public/**
