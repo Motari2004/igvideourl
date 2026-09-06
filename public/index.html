@@ -233,7 +233,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            max-height: 60px;
+            max-height: 80px;
             overflow-y: auto;
         }
         
@@ -242,6 +242,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             word-break: break-all;
+            font-size: 11px;
         }
         
         .url-box .copy-small {
@@ -313,6 +314,16 @@
             margin-left: 5px;
         }
         
+        .loading-spinner {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
         @media (max-width: 600px) {
             .card { padding: 20px; }
             .input-group { flex-direction: column; }
@@ -364,7 +375,7 @@
                 </div>
                 
                 <div class="button-group">
-                    <a id="downloadLink" href="#" class="btn btn-download" download target="_blank">⬇️ Download Video</a>
+                    <a id="downloadLink" href="#" class="btn btn-download" target="_blank">⬇️ Download Video</a>
                     <button class="btn btn-copy" onclick="copyUrl()">📋 Copy URL</button>
                 </div>
                 
@@ -458,15 +469,19 @@
             const downloadLink = document.getElementById('downloadLink');
             const urlText = document.getElementById('urlText');
 
-            // Use the direct rapidcdn URL
+            // Use the direct rapidcdn URL - DON'T add the base URL
             const directUrl = data.directDownloadUrl || data.downloadUrl;
             currentDownloadUrl = directUrl;
 
             filename.textContent = data.filename;
             fileSize.textContent = data.fileSize;
             downloadTime.textContent = data.downloadTime || 'N/A';
+            
+            // Set the download link href to the direct URL (not the local server URL)
             downloadLink.href = directUrl;
             downloadLink.target = '_blank';
+            
+            // Display the URL in the text box
             urlText.textContent = directUrl;
             
             resultSection.style.display = 'block';
