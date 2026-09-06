@@ -11,7 +11,7 @@
     "express": "^4.18.2",
     "playwright": "^1.40.0",
     "cors": "^2.8.5",
-    "rate-limit": "^1.0.0"
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

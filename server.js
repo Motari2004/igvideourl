@@ -2,29 +2,72 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use('/api/', limiter);
 app.use(express.static('public'));
 
 // Ensure downloads directory exists
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
 if (!fs.existsSync(DOWNLOAD_DIR)) {
   fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+  console.log('📁 Created downloads directory');
 }
+
+// Clean up old downloads (files older than 1 hour)
+setInterval(() => {
+  try {
+    const files = fs.readdirSync(DOWNLOAD_DIR);
+    const now = Date.now();
+    let deletedCount = 0;
+    files.forEach(file => {
+      const filepath = path.join(DOWNLOAD_DIR, file);
+      try {
+        const stats = fs.statSync(filepath);
+        if (now - stats.mtimeMs > 3600000) { // 1 hour
+          fs.unlinkSync(filepath);
+          deletedCount++;
+          console.log(`🗑️ Deleted old file: ${file}`);
+        }
+      } catch (err) {
+        // File might have been deleted already
+      }
+    });
+    if (deletedCount > 0) {
+      console.log(`🧹 Cleaned up ${deletedCount} old files`);
+    }
+  } catch (error) {
+    console.error('Cleanup error:', error.message);
+  }
+}, 3600000); // Run every hour
 
 // Store active browser instance
 let browser = null;
 let browserInitPromise = null;
+let isBrowserReady = false;
 
 // Initialize browser
 async function initBrowser() {
-  if (browser) return browser;
+  if (browser && isBrowserReady) {
+    return browser;
+  }
   
   if (browserInitPromise) {
     return browserInitPromise;
@@ -34,25 +77,47 @@ async function initBrowser() {
     try {
       console.log('🚀 Launching browser...');
       
-      // Try to find Chromium path
-      const basePath = path.join(process.env.USERPROFILE || process.env.HOME, 'AppData', 'Local', 'ms-playwright');
       let executablePath = null;
       
-      if (fs.existsSync(basePath)) {
-        const dirs = fs.readdirSync(basePath)
-          .filter(dir => dir.startsWith('chromium-'))
-          .sort((a, b) => {
-            const numA = parseInt(a.split('-')[1]);
-            const numB = parseInt(b.split('-')[1]);
-            return numB - numA;
-          });
-
-        for (const dir of dirs) {
-          const chromePath = path.join(basePath, dir, 'chrome-win64', 'chrome.exe');
-          if (fs.existsSync(chromePath)) {
-            executablePath = chromePath;
-            console.log(`✅ Found Chromium: ${dir}`);
+      // Check if we're on Render
+      if (process.env.RENDER) {
+        // Try common Render Chrome paths
+        const renderPaths = [
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser'
+        ];
+        
+        for (const path of renderPaths) {
+          if (fs.existsSync(path)) {
+            executablePath = path;
+            console.log(`✅ Found Chrome at: ${path}`);
             break;
+          }
+        }
+        
+        if (!executablePath) {
+          console.log('⚠️ No Chrome found on Render, using Playwright default');
+        }
+      } else {
+        // Local development - try to find Chromium
+        const basePath = path.join(process.env.USERPROFILE || process.env.HOME, 'AppData', 'Local', 'ms-playwright');
+        if (fs.existsSync(basePath)) {
+          const dirs = fs.readdirSync(basePath)
+            .filter(dir => dir.startsWith('chromium-'))
+            .sort((a, b) => {
+              const numA = parseInt(a.split('-')[1]);
+              const numB = parseInt(b.split('-')[1]);
+              return numB - numA;
+            });
+
+          for (const dir of dirs) {
+            const chromePath = path.join(basePath, dir, 'chrome-win64', 'chrome.exe');
+            if (fs.existsSync(chromePath)) {
+              executablePath = chromePath;
+              console.log(`✅ Found Chromium: ${dir}`);
+              break;
+            }
           }
         }
       }
@@ -65,15 +130,21 @@ async function initBrowser() {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--disable-web-security'
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--window-size=1366,768'
         ]
       });
 
+      isBrowserReady = true;
       console.log('✅ Browser launched successfully');
       return browser;
     } catch (error) {
       console.error('❌ Failed to launch browser:', error.message);
       browserInitPromise = null;
+      isBrowserReady = false;
       throw error;
     }
   })();
@@ -81,34 +152,115 @@ async function initBrowser() {
   return browserInitPromise;
 }
 
+// Handle ads function
+async function handleAds(page) {
+  try {
+    console.log('🔍 Checking for ads...');
+    let adClosed = false;
+    
+    const adCloseMethods = [
+      // Method 1: Role-based close button
+      async () => {
+        try {
+          const closeBtn = page.getByRole('button', { name: 'Close' });
+          if (await closeBtn.isVisible({ timeout: 2000 })) {
+            await closeBtn.click();
+            console.log('✅ Ad closed via role button');
+            return true;
+          }
+        } catch {}
+        return false;
+      },
+      // Method 2: Text-based close button
+      async () => {
+        try {
+          const closeBtn = page.locator('button:has-text("Close"), button:has-text("close"), button:has-text("×"), button:has-text("X")');
+          if (await closeBtn.isVisible({ timeout: 2000 })) {
+            await closeBtn.first().click();
+            console.log('✅ Ad closed via text button');
+            return true;
+          }
+        } catch {}
+        return false;
+      },
+      // Method 3: Click outside ad
+      async () => {
+        try {
+          const adContent = page.locator('#ad-content, .ad-container, [class*="ad-"], [id*="ad-"]');
+          if (await adContent.isVisible({ timeout: 2000 })) {
+            await page.click('body', { position: { x: 10, y: 10 } });
+            console.log('✅ Ad dismissed by clicking outside');
+            return true;
+          }
+        } catch {}
+        return false;
+      },
+      // Method 4: ESC key
+      async () => {
+        try {
+          await page.keyboard.press('Escape');
+          console.log('✅ Pressed ESC to dismiss ad');
+          return true;
+        } catch {}
+        return false;
+      }
+    ];
+
+    for (const method of adCloseMethods) {
+      try {
+        if (await method()) {
+          adClosed = true;
+          await page.waitForTimeout(1000);
+          break;
+        }
+      } catch (error) {
+        // Continue to next method
+      }
+    }
+
+    if (!adClosed) {
+      console.log('ℹ️ No ads detected or ads already closed');
+    }
+    
+    return adClosed;
+  } catch (error) {
+    console.log('ℹ️ Ad handling completed');
+    return false;
+  }
+}
+
 // Download video function
 async function downloadVideo(instagramUrl) {
   let page = null;
+  const startTime = Date.now();
   
   try {
+    console.log(`📥 Processing: ${instagramUrl}`);
+    
     const browserInstance = await initBrowser();
     page = await browserInstance.newPage();
     await page.setViewportSize({ width: 1366, height: 768 });
     page.setDefaultTimeout(30000);
 
-    console.log(`📥 Processing: ${instagramUrl}`);
-
     // Navigate to snapsave.app
+    console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
       timeout: 15000 
     });
     await page.waitForTimeout(2000);
 
-    // Handle ads
+    // Handle initial ads
     await handleAds(page);
 
     // Enter URL
+    console.log('✏️ Entering URL...');
     const urlInput = page.getByRole('textbox', { name: 'Url' });
     await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
 
     // Click download button
+    console.log('🔄 Clicking download button...');
     const downloadBtn = page.getByRole('button', { name: 'Download' });
     await downloadBtn.click();
     await page.waitForTimeout(3000);
@@ -119,31 +271,48 @@ async function downloadVideo(instagramUrl) {
     // Wait for download link
     console.log('⏳ Waiting for download link...');
     
-    const downloadLinkSelector = 'a[onclick*="showAd"][href*="rapidcdn"]';
-    const downloadVideoSelector = 'a:has-text("Download video")';
+    const downloadLinkSelectors = [
+      'a[onclick*="showAd"][href*="rapidcdn"]',
+      'a:has-text("Download video")',
+      'a:has-text("Download")',
+      'a[download]',
+      '.download-link',
+      '[class*="download"] a'
+    ];
     
     let downloadLink = null;
+    let usedSelector = null;
     
-    try {
-      const linkWithOnclick = page.locator(downloadLinkSelector).first();
-      if (await linkWithOnclick.isVisible({ timeout: 5000 })) {
-        downloadLink = linkWithOnclick;
-        console.log('✅ Found download link with onclick handler');
-      }
-    } catch {}
-
-    if (!downloadLink) {
+    for (const selector of downloadLinkSelectors) {
       try {
-        const linkWithText = page.locator(downloadVideoSelector).first();
-        if (await linkWithText.isVisible({ timeout: 3000 })) {
-          downloadLink = linkWithText;
-          console.log('✅ Found download link with text "Download video"');
+        const element = page.locator(selector).first();
+        if (await element.isVisible({ timeout: 3000 })) {
+          downloadLink = element;
+          usedSelector = selector;
+          console.log(`✅ Found download link using selector: ${selector}`);
+          break;
         }
       } catch {}
     }
 
     if (!downloadLink) {
-      throw new Error('Download link not found');
+      // Try one more time with a more generic approach
+      try {
+        const allLinks = await page.locator('a').all();
+        for (const link of allLinks) {
+          const href = await link.getAttribute('href');
+          if (href && (href.includes('rapidcdn') || href.includes('download'))) {
+            downloadLink = link;
+            usedSelector = 'generic link search';
+            console.log('✅ Found download link via generic search');
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!downloadLink) {
+      throw new Error('Download link not found after multiple attempts');
     }
 
     // Get the download URL
@@ -172,24 +341,32 @@ async function downloadVideo(instagramUrl) {
     const filepath = path.join(DOWNLOAD_DIR, filename);
 
     // Download the video
-    console.log('📥 Downloading video...');
+    console.log(`📥 Downloading video to: ${filename}`);
     
     // Set up download listener
     const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
 
     // Click the download link
+    console.log('🖱️ Clicking download link...');
     await downloadLink.click();
 
     // Wait for download
+    console.log('⏳ Waiting for download to start...');
     const download = await downloadPromise;
+    console.log('✅ Download started!');
+
+    // Save the file
+    console.log('💾 Saving file...');
     await download.saveAs(filepath);
 
+    // Get file stats
     const stats = fs.statSync(filepath);
     const fileSizeMB = stats.size / (1024 * 1024);
+    const downloadTime = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log(`✅ Video downloaded: ${filename} (${fileSizeMB.toFixed(2)} MB)`);
+    console.log(`✅ Video downloaded: ${filename} (${fileSizeMB.toFixed(2)} MB) in ${downloadTime}s`);
 
-    // Return the download URL (for direct access)
+    // Return the download URL
     const fileUrl = `/downloads/${filename}`;
 
     return {
@@ -197,6 +374,7 @@ async function downloadVideo(instagramUrl) {
       filename: filename,
       downloadUrl: fileUrl,
       fileSize: `${fileSizeMB.toFixed(2)} MB`,
+      downloadTime: `${downloadTime}s`,
       originalUrl: instagramUrl
     };
 
@@ -206,53 +384,8 @@ async function downloadVideo(instagramUrl) {
   } finally {
     if (page) {
       await page.close();
+      console.log('🔒 Page closed');
     }
-  }
-}
-
-// Handle ads function
-async function handleAds(page) {
-  try {
-    const adCloseMethods = [
-      async () => {
-        try {
-          const closeBtn = page.getByRole('button', { name: 'Close' });
-          if (await closeBtn.isVisible({ timeout: 2000 })) {
-            await closeBtn.click();
-            return true;
-          }
-        } catch {}
-        return false;
-      },
-      async () => {
-        try {
-          const closeBtn = page.locator('button:has-text("Close"), button:has-text("close"), button:has-text("×"), button:has-text("X")');
-          if (await closeBtn.isVisible({ timeout: 2000 })) {
-            await closeBtn.first().click();
-            return true;
-          }
-        } catch {}
-        return false;
-      },
-      async () => {
-        try {
-          await page.keyboard.press('Escape');
-          return true;
-        } catch {}
-        return false;
-      }
-    ];
-
-    for (const method of adCloseMethods) {
-      try {
-        if (await method()) {
-          await page.waitForTimeout(1000);
-          return true;
-        }
-      } catch {}
-    }
-  } catch (error) {
-    console.log('Ad handling completed');
   }
 }
 
@@ -262,17 +395,27 @@ app.post('/api/download', async (req, res) => {
     const { url } = req.body;
     
     if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'URL is required' 
+      });
     }
 
     // Validate Instagram URL
-    if (!url.includes('instagram.com')) {
-      return res.status(400).json({ error: 'Please provide a valid Instagram URL' });
+    if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Please provide a valid Instagram URL' 
+      });
     }
 
-    console.log(`📥 Download request for: ${url}`);
+    console.log(`\n📥 New download request for: ${url}`);
+    console.log(`🕐 Time: ${new Date().toISOString()}`);
     
     const result = await downloadVideo(url);
+    
+    console.log(`✅ Request completed successfully`);
+    console.log(`📊 Response: ${JSON.stringify(result, null, 2)}`);
     
     res.json({
       success: true,
@@ -280,10 +423,10 @@ app.post('/api/download', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('❌ API Error:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to download video'
+      error: error.message || 'Failed to download video. Please try again.'
     });
   }
 });
@@ -296,22 +439,91 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  const health = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    browserReady: isBrowserReady,
+    downloadDir: DOWNLOAD_DIR,
+    downloadCount: fs.existsSync(DOWNLOAD_DIR) ? fs.readdirSync(DOWNLOAD_DIR).length : 0
+  };
+  
+  // Check if browser is actually working
+  try {
+    if (browser) {
+      const version = await browser.version();
+      health.browserVersion = version;
+    }
+  } catch (e) {
+    health.browserVersion = 'unavailable';
+  }
+  
+  res.json(health);
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found'
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Visit http://localhost:${PORT}`);
+  console.log('\n' + '═'.repeat(60));
+  console.log('🚀 Instagram Video Downloader Server');
+  console.log('═'.repeat(60));
+  console.log(`🌐 Server running on port ${PORT}`);
+  console.log(`📍 Local: http://localhost:${PORT}`);
+  console.log(`🕐 Started: ${new Date().toISOString()}`);
+  console.log('═'.repeat(60) + '\n');
 });
 
-// Cleanup on exit
+// Graceful shutdown
 process.on('SIGINT', async () => {
+  console.log('\n🛑 Received SIGINT. Shutting down gracefully...');
   if (browser) {
-    await browser.close();
-    console.log('Browser closed');
+    try {
+      await browser.close();
+      console.log('🔒 Browser closed');
+    } catch (e) {
+      console.error('Error closing browser:', e.message);
+    }
   }
-  process.exit();
+  console.log('👋 Goodbye!');
+  process.exit(0);
 });
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Received SIGTERM. Shutting down gracefully...');
+  if (browser) {
+    try {
+      await browser.close();
+      console.log('🔒 Browser closed');
+    } catch (e) {
+      console.error('Error closing browser:', e.message);
+    }
+  }
+  console.log('👋 Goodbye!');
+  process.exit(0);
+});
+
+// Unhandled rejection handler
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+module.exports = app;
