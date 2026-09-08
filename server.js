@@ -281,7 +281,7 @@ async function downloadVideo(instagramUrl) {
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
-      timeout: 15000 
+      timeout: 30000 
     });
     await page.waitForTimeout(2000);
     await takeScreenshot('01_initial_page', 'Initial snapsave.app page');
