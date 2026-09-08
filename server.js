@@ -42,6 +42,30 @@ const VERCEL_WEBHOOK_URL = 'https://fetchgram-one.vercel.app/api/webhook/caption
 let activeRequests = 0;
 let isShuttingDown = false;
 
+// ============== REQUEST LOGGING ==============
+let requestLog = [];
+const MAX_LOG_ENTRIES = 100;
+
+function logRequest(level, message, data = null) {
+    const entry = {
+        timestamp: new Date().toISOString(),
+        level: level,
+        message: message,
+        data: data
+    };
+    requestLog.push(entry);
+    if (requestLog.length > MAX_LOG_ENTRIES) {
+        requestLog.shift();
+    }
+    
+    // Also log to console with timestamp
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] ${level}: ${message}`);
+    if (data) {
+        console.log(`  └─ ${JSON.stringify(data, null, 2)}`);
+    }
+}
+
 // ============== BROWSER SETUP ==============
 
 const { chromium } = require('playwright');
@@ -75,30 +99,36 @@ function findChromePath() {
   for (const path of paths) {
     try {
       if (fs.existsSync(path)) {
-        console.log(`✅ Found browser at: ${path}`);
+        logRequest('INFO', `Found browser at: ${path}`);
         return path;
       }
     } catch (e) {}
   }
   
-  console.log('⚠️ No browser found, using Playwright default');
+  logRequest('WARN', 'No browser found, using Playwright default');
   return null;
 }
 
 const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
 
 async function initBrowser() {
-  if (browser && isBrowserReady && !isShuttingDown) return browser;
-  if (browserInitPromise) return browserInitPromise;
+  if (browser && isBrowserReady && !isShuttingDown) {
+    logRequest('INFO', 'Browser already ready, reusing instance');
+    return browser;
+  }
+  if (browserInitPromise) {
+    logRequest('INFO', 'Browser initialization in progress, waiting...');
+    return browserInitPromise;
+  }
 
   browserInitPromise = (async () => {
     try {
-      console.log('🚀 Launching browser...');
+      logRequest('INFO', '🚀 Launching browser...');
       
       const executablePath = findChromePath();
 
       browser = await chromium.launch({
-        headless: true, // Always headless on Render
+        headless: true,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -118,10 +148,10 @@ async function initBrowser() {
       });
 
       isBrowserReady = true;
-      console.log('✅ Browser launched successfully (headless)');
+      logRequest('INFO', '✅ Browser launched successfully (headless)');
       return browser;
     } catch (error) {
-      console.error('❌ Failed to launch browser:', error.message);
+      logRequest('ERROR', `❌ Failed to launch browser: ${error.message}`);
       browserInitPromise = null;
       isBrowserReady = false;
       throw error;
@@ -144,7 +174,11 @@ async function handleAds(page) {
 
 async function sendToVercel(instagramUrl, videoUrl, caption) {
     try {
-        console.log(`📤 Sending to Vercel webhook...`);
+        logRequest('INFO', `📤 Sending to Vercel webhook...`, { 
+            instagramUrl: instagramUrl.substring(0, 50) + '...',
+            videoUrl: videoUrl.substring(0, 50) + '...',
+            captionLength: caption ? caption.length : 0
+        });
         
         const payload = {
             reel_url: instagramUrl,
@@ -166,14 +200,14 @@ async function sendToVercel(instagramUrl, videoUrl, caption) {
         });
         
         if (response.ok) {
-            console.log(`✅ Successfully sent to Vercel webhook`);
+            logRequest('INFO', `✅ Successfully sent to Vercel webhook`, { status: response.status });
             return true;
         } else {
-            console.log(`⚠️ Vercel webhook returned ${response.status}`);
+            logRequest('WARN', `⚠️ Vercel webhook returned ${response.status}`);
             return false;
         }
     } catch (error) {
-        console.log(`⚠️ Failed to send to Vercel: ${error.message}`);
+        logRequest('ERROR', `⚠️ Failed to send to Vercel: ${error.message}`);
         return false;
     }
 }
@@ -181,122 +215,185 @@ async function sendToVercel(instagramUrl, videoUrl, caption) {
 // ============== DOWNLOAD VIA INSTADL.FITYDOWN.COM ==============
 
 async function downloadViaFitydown(instagramUrl) {
-  console.log('📥 Processing via instadl.fitydown.com...');
+  logRequest('INFO', `📥 Processing via instadl.fitydown.com...`, { url: instagramUrl.substring(0, 60) + '...' });
   
   let page = null;
   const startTime = Date.now();
   let caption = '';
   let downloadUrl = null;
+  let stepTimings = {};
+  let stepStart = Date.now();
   
   try {
     if (isShuttingDown) {
       throw new Error('Server is shutting down');
     }
     
+    // Step 1: Initialize browser
+    stepStart = Date.now();
+    logRequest('INFO', '🔧 Step 1: Initializing browser...');
     const browserInstance = await initBrowser();
+    stepTimings.browserInit = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Browser initialized in ${stepTimings.browserInit}`);
+    
+    // Step 2: Create new page
+    stepStart = Date.now();
+    logRequest('INFO', '📄 Step 2: Creating new page...');
     page = await browserInstance.newPage();
     await page.setViewportSize({ width: 1366, height: 768 });
     page.setDefaultTimeout(60000);
+    stepTimings.pageCreate = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Page created in ${stepTimings.pageCreate}`);
 
-    // Enable network interception
+    // Step 3: Enable network interception
+    stepStart = Date.now();
+    logRequest('INFO', '🔍 Step 3: Setting up network interception...');
     await page.route('**/*', async (route) => {
       const url = route.request().url();
       
       if (url.includes('fitydown.onrender.com/download_file/')) {
         downloadUrl = url;
-        console.log(`✅ Intercepted FityDown URL: ${downloadUrl}`);
+        logRequest('INFO', `✅ Intercepted FityDown URL: ${downloadUrl}`);
       }
       
       if (url.includes('.mp4') || url.includes('video')) {
         if (!downloadUrl) {
           downloadUrl = url;
-          console.log(`✅ Intercepted video URL: ${downloadUrl.substring(0, 60)}...`);
+          logRequest('INFO', `✅ Intercepted video URL: ${downloadUrl.substring(0, 60)}...`);
         }
       }
       
       await route.continue();
     });
+    stepTimings.networkSetup = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Network interception setup in ${stepTimings.networkSetup}`);
 
-    // 1. Navigate
-    console.log('🌐 Navigating to instadl.fitydown.com...');
+    // Step 4: Navigate to fitydown
+    stepStart = Date.now();
+    logRequest('INFO', '🌐 Step 4: Navigating to instadl.fitydown.com...');
     await page.goto('https://instadl.fitydown.com/', { 
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
+    stepTimings.navigate = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Navigation completed in ${stepTimings.navigate}`);
+    
     await page.waitForTimeout(2000);
+    logRequest('INFO', '⏳ Waited 2s for page to stabilize');
 
-    // 2. Handle ads
+    // Step 5: Handle ads
+    stepStart = Date.now();
+    logRequest('INFO', '🛡️ Step 5: Handling ads...');
     await handleAds(page);
+    stepTimings.adHandling = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Ads handled in ${stepTimings.adHandling}`);
 
-    // 3. Enter URL
-    console.log('✏️ Entering URL...');
+    // Step 6: Enter URL
+    stepStart = Date.now();
+    logRequest('INFO', '✏️ Step 6: Entering URL...');
     const urlInput = page.getByRole('textbox', { name: 'Instagram video URL' });
     await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
+    stepTimings.urlEntry = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ URL entered in ${stepTimings.urlEntry}`);
 
-    // 4. Click Download
-    console.log('🔄 Clicking Download button...');
+    // Step 7: Click Download
+    stepStart = Date.now();
+    logRequest('INFO', '🔄 Step 7: Clicking Download button...');
     const downloadBtn = page.locator('#downloadBtn').getByText('Download');
     await downloadBtn.click();
-    console.log('✅ Download initiated');
+    stepTimings.downloadClick = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ Download button clicked in ${stepTimings.downloadClick}`);
 
-    // 5. Wait for MP4 button
-    console.log('⏳ Waiting for MP4 download option...');
+    // Step 8: Wait for MP4 button
+    stepStart = Date.now();
+    logRequest('INFO', '⏳ Step 8: Waiting for MP4 download option...');
     await page.waitForTimeout(3000);
+    stepTimings.mp4Wait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ MP4 option wait completed in ${stepTimings.mp4Wait}`);
     
-    // 6. Click MP4
-    console.log('🔍 Looking for Download MP4 button...');
+    // Step 9: Click MP4
+    stepStart = Date.now();
+    logRequest('INFO', '🔍 Step 9: Looking for Download MP4 button...');
     const mp4Btn = page.locator('#btn-mp4').getByText('Download MP4 (Video)');
     
     if (await mp4Btn.isVisible({ timeout: 10000 })) {
-      console.log('✅ Found MP4 button, clicking...');
+      logRequest('INFO', '✅ Found MP4 button, clicking...');
       await mp4Btn.click();
-      console.log('✅ MP4 download clicked!');
+      stepTimings.mp4Click = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+      logRequest('INFO', `✅ MP4 download clicked in ${stepTimings.mp4Click}`);
     } else {
-      console.log('⚠️ MP4 button not found, trying alternative...');
+      logRequest('WARN', '⚠️ MP4 button not found, trying alternative...');
       const altBtn = page.locator('button:has-text("MP4"), a:has-text("Download MP4")').first();
       if (await altBtn.isVisible({ timeout: 3000 })) {
         await altBtn.click();
-        console.log('✅ Alternative MP4 button clicked!');
+        stepTimings.mp4Click = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+        logRequest('INFO', `✅ Alternative MP4 button clicked in ${stepTimings.mp4Click}`);
+      } else {
+        stepTimings.mp4Click = 'failed';
+        logRequest('ERROR', '❌ No MP4 button found');
       }
     }
 
-    // 7. Wait for URL interception
-    console.log('⏳ Waiting for download URL to be intercepted...');
+    // Step 10: Wait for URL interception
+    stepStart = Date.now();
+    logRequest('INFO', '⏳ Step 10: Waiting for download URL to be intercepted...');
     let attempts = 0;
     while (!downloadUrl && attempts < 30) {
       await page.waitForTimeout(1000);
       attempts++;
       if (attempts % 5 === 0) {
-        console.log(`⏳ Waiting for download URL... (${attempts}s)`);
+        logRequest('INFO', `⏳ Waiting for download URL... (${attempts}s)`);
       }
     }
+    stepTimings.urlWait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    
+    if (downloadUrl) {
+      logRequest('INFO', `✅ Download URL intercepted in ${stepTimings.urlWait}`);
+    } else {
+      logRequest('WARN', `⚠️ No URL intercepted after ${attempts}s`);
+    }
 
-    // 8. Fallback: Check page content
+    // Step 11: Fallback - Check page content
     if (!downloadUrl) {
-      console.log('⚠️ URL not intercepted, checking page content...');
+      stepStart = Date.now();
+      logRequest('WARN', '⚠️ Step 11: URL not intercepted, checking page content...');
       
       try {
         const html = await page.content();
         const matches = html.match(/https:\/\/fitydown\.onrender\.com\/download_file\/[a-f0-9]+/gi);
         if (matches && matches.length > 0) {
           downloadUrl = matches[0];
-          console.log(`✅ Found FityDown URL in HTML: ${downloadUrl.substring(0, 60)}...`);
+          stepTimings.htmlCheck = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+          logRequest('INFO', `✅ Found FityDown URL in HTML: ${downloadUrl.substring(0, 60)}...`);
+        } else {
+          stepTimings.htmlCheck = 'no match';
+          logRequest('WARN', '⚠️ No URL found in HTML content');
         }
-      } catch (error) {}
+      } catch (error) {
+        stepTimings.htmlCheck = 'error';
+        logRequest('ERROR', `❌ HTML check error: ${error.message}`);
+      }
     }
 
+    // Step 12: Error if no URL
     if (!downloadUrl) {
+      logRequest('ERROR', '❌ Step 12: Could not find download URL');
       try {
-        await page.screenshot({ path: path.join(DEBUG_DIR, 'error_no_url.png'), fullPage: true });
-        console.log('📸 Saved error screenshot: error_no_url.png');
-      } catch (e) {}
+        const screenshotPath = path.join(DEBUG_DIR, `error_${Date.now()}.png`);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        logRequest('INFO', `📸 Saved error screenshot: ${screenshotPath}`);
+      } catch (e) {
+        logRequest('ERROR', `❌ Screenshot error: ${e.message}`);
+      }
       throw new Error('Could not find download URL');
     }
 
-    console.log(`✅ Download URL captured: ${downloadUrl}`);
+    logRequest('INFO', `✅ Download URL captured: ${downloadUrl}`);
 
-    // 9. Get caption
+    // Step 13: Get caption
+    stepStart = Date.now();
+    logRequest('INFO', '📝 Step 13: Getting caption...');
     try {
       const captionEl = await page.locator('.caption, .description, [class*="caption"]').first();
       if (await captionEl.isVisible({ timeout: 2000 })) {
@@ -305,13 +402,34 @@ async function downloadViaFitydown(instagramUrl) {
             !text.includes('Error') && 
             !text.includes('Download')) {
           caption = text.trim();
-          console.log(`✅ Caption found: ${caption.substring(0, 50)}...`);
+          stepTimings.captionFetch = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+          logRequest('INFO', `✅ Caption found (${caption.length} chars): ${caption.substring(0, 50)}...`);
+        } else {
+          stepTimings.captionFetch = 'empty or invalid';
+          logRequest('INFO', 'ℹ️ No valid caption found');
         }
+      } else {
+        stepTimings.captionFetch = 'not visible';
+        logRequest('INFO', 'ℹ️ Caption element not visible');
       }
-    } catch (error) {}
+    } catch (error) {
+      stepTimings.captionFetch = 'error';
+      logRequest('WARN', `⚠️ Caption fetch error: ${error.message}`);
+    }
 
-    console.log('⏳ Waiting 5 seconds before closing...');
+    // Step 14: Final wait
+    logRequest('INFO', '⏳ Step 14: Waiting 5 seconds before closing...');
     await page.waitForTimeout(5000);
+    stepTimings.finalWait = '5s';
+
+    // Calculate total time
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    
+    // Log all timings
+    logRequest('INFO', '📊 TIMING SUMMARY:', {
+      totalTime: `${totalTime}s`,
+      steps: stepTimings
+    });
 
     return {
       success: true,
@@ -319,23 +437,28 @@ async function downloadViaFitydown(instagramUrl) {
       downloadUrl: downloadUrl,
       directDownloadUrl: downloadUrl,
       fileSize: 'Unknown',
-      downloadTime: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+      downloadTime: `${totalTime}s`,
       originalUrl: instagramUrl,
       isDirectUrl: true,
       source: 'fitydown',
       caption: caption || '',
-      videoUrl: downloadUrl
+      videoUrl: downloadUrl,
+      timings: stepTimings,
+      logs: requestLog.slice(-20) // Last 20 log entries
     };
 
   } catch (error) {
-    console.error(`❌ Download error: ${error.message}`);
+    logRequest('ERROR', `❌ Download error: ${error.message}`);
+    logRequest('ERROR', `Stack trace: ${error.stack}`);
     throw error;
   } finally {
     if (page) {
       try {
         await page.close();
-        console.log('🔒 Page closed');
-      } catch (e) {}
+        logRequest('INFO', '🔒 Page closed');
+      } catch (e) {
+        logRequest('WARN', `⚠️ Page close error: ${e.message}`);
+      }
     }
   }
 }
@@ -343,13 +466,16 @@ async function downloadViaFitydown(instagramUrl) {
 // ============== MAIN DOWNLOAD FUNCTION ==============
 
 async function downloadVideo(instagramUrl) {
-  console.log(`\n📥 Processing: ${instagramUrl}`);
+  logRequest('INFO', `\n📥 Processing: ${instagramUrl.substring(0, 60)}...`);
   
   try {
     const result = await downloadViaFitydown(instagramUrl);
     
     if (result && result.success) {
-      console.log(`✅ Video URL captured!`);
+      logRequest('INFO', `✅ Video URL captured!`, { 
+        url: result.downloadUrl.substring(0, 50) + '...',
+        time: result.downloadTime
+      });
       await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
       return result;
     }
@@ -357,7 +483,7 @@ async function downloadVideo(instagramUrl) {
     throw new Error('Download failed');
     
   } catch (error) {
-    console.error(`❌ Download error: ${error.message}`);
+    logRequest('ERROR', `❌ Download error: ${error.message}`);
     throw error;
   }
 }
@@ -365,33 +491,51 @@ async function downloadVideo(instagramUrl) {
 // ============== API ROUTES ==============
 
 app.post('/api/download', async (req, res) => {
+  const requestId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   activeRequests++;
+  
+  logRequest('INFO', `🚀 [${requestId}] New download request received`, {
+    source: req.headers['user-agent'] || 'unknown',
+    ip: req.ip || req.connection.remoteAddress,
+    activeRequests: activeRequests
+  });
   
   try {
     const { url } = req.body;
     
     if (!url) {
       activeRequests--;
+      logRequest('WARN', `[${requestId}] Missing URL parameter`);
       return res.status(400).json({ 
         success: false,
-        error: 'URL is required' 
+        error: 'URL is required',
+        requestId: requestId
       });
     }
 
     if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
       activeRequests--;
+      logRequest('WARN', `[${requestId}] Invalid Instagram URL: ${url.substring(0, 50)}...`);
       return res.status(400).json({ 
         success: false,
-        error: 'Please provide a valid Instagram URL' 
+        error: 'Please provide a valid Instagram URL',
+        requestId: requestId
       });
     }
 
-    console.log(`\n📥 New download request for: ${url}`);
+    logRequest('INFO', `[${requestId}] Processing URL: ${url.substring(0, 60)}...`);
     
     const result = await downloadVideo(url);
     
+    logRequest('INFO', `[${requestId}] ✅ Download successful`, {
+      url: result.downloadUrl.substring(0, 50) + '...',
+      time: result.downloadTime,
+      hasCaption: !!result.caption
+    });
+    
     res.json({
       success: true,
+      requestId: requestId,
       data: {
         ...result,
         webhook_sent: true
@@ -399,14 +543,65 @@ app.post('/api/download', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ API Error:', error.message);
+    logRequest('ERROR', `[${requestId}] ❌ API Error: ${error.message}`);
+    logRequest('ERROR', `[${requestId}] Stack: ${error.stack}`);
     res.status(500).json({
       success: false,
+      requestId: requestId,
       error: error.message || 'Failed to download video. Please try again.'
     });
   } finally {
     activeRequests--;
+    logRequest('INFO', `[${requestId}] Request completed. Active: ${activeRequests}`);
   }
+});
+
+// ============== LOGGING ENDPOINTS ==============
+
+// Get recent logs
+app.get('/api/logs', (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const logs = requestLog.slice(-limit);
+  res.json({
+    status: 'ok',
+    count: logs.length,
+    total: requestLog.length,
+    logs: logs
+  });
+});
+
+// Get request stats
+app.get('/api/stats', (req, res) => {
+  res.json({
+    status: 'ok',
+    activeRequests: activeRequests,
+    totalRequests: requestLog.filter(log => log.level === 'INFO' && log.message.includes('New download request')).length,
+    logCount: requestLog.length,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    browserReady: isBrowserReady,
+    isShuttingDown: isShuttingDown
+  });
+});
+
+// Health check with details
+app.get('/health', async (req, res) => {
+  const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    active_requests: activeRequests,
+    is_shutting_down: isShuttingDown,
+    is_render: isRender,
+    browser_ready: isBrowserReady,
+    memory: process.memoryUsage(),
+    downloadDir: DOWNLOAD_DIR,
+    debugDir: DEBUG_DIR,
+    downloadCount: fs.existsSync(DOWNLOAD_DIR) ? fs.readdirSync(DOWNLOAD_DIR).length : 0,
+    screenshotCount: fs.existsSync(DEBUG_DIR) ? fs.readdirSync(DEBUG_DIR).length : 0,
+    logCount: requestLog.length
+  });
 });
 
 // Serve downloaded files
@@ -417,25 +612,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Health check
-app.get('/health', async (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    active_requests: activeRequests,
-    is_shutting_down: isShuttingDown,
-    is_render: isRender,
-    memory: process.memoryUsage(),
-    downloadDir: DOWNLOAD_DIR,
-    debugDir: DEBUG_DIR,
-    downloadCount: fs.existsSync(DOWNLOAD_DIR) ? fs.readdirSync(DOWNLOAD_DIR).length : 0,
-    screenshotCount: fs.existsSync(DEBUG_DIR) ? fs.readdirSync(DEBUG_DIR).length : 0
-  });
-});
-
 // 404 handler
 app.use((req, res) => {
+  logRequest('WARN', `404: ${req.method} ${req.url}`);
   res.status(404).json({
     success: false,
     error: 'Route not found'
@@ -444,7 +623,8 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  logRequest('ERROR', `Server error: ${err.message}`);
+  logRequest('ERROR', `Stack: ${err.stack}`);
   res.status(500).json({
     success: false,
     error: 'Internal server error'
@@ -454,30 +634,30 @@ app.use((err, req, res, next) => {
 // ============== GRACEFUL SHUTDOWN ==============
 
 async function gracefulShutdown(signal) {
-  console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
+  logRequest('INFO', `\n🛑 Received ${signal}. Shutting down gracefully...`);
   isShuttingDown = true;
   
   let waitCount = 0;
   while (activeRequests > 0 && waitCount < 30) {
-    console.log(`⏳ Waiting for ${activeRequests} active requests to complete...`);
+    logRequest('INFO', `⏳ Waiting for ${activeRequests} active requests to complete...`);
     await new Promise(resolve => setTimeout(resolve, 1000));
     waitCount++;
   }
   
   if (activeRequests > 0) {
-    console.log(`⚠️ ${activeRequests} requests still active, forcing shutdown...`);
+    logRequest('WARN', `⚠️ ${activeRequests} requests still active, forcing shutdown...`);
   }
   
   if (browser) {
     try {
       await browser.close();
-      console.log('🔒 Browser closed');
+      logRequest('INFO', '🔒 Browser closed');
     } catch (e) {
-      console.log('⚠️ Error closing browser:', e.message);
+      logRequest('WARN', `⚠️ Error closing browser: ${e.message}`);
     }
   }
   
-  console.log('👋 Goodbye!');
+  logRequest('INFO', '👋 Goodbye!');
   process.exit(0);
 }
 
@@ -485,7 +665,15 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection:', reason);
+  logRequest('ERROR', `❌ Unhandled Rejection: ${reason}`);
+  if (reason && reason.stack) {
+    logRequest('ERROR', `Stack: ${reason.stack}`);
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  logRequest('ERROR', `❌ Uncaught Exception: ${error.message}`);
+  logRequest('ERROR', `Stack: ${error.stack}`);
 });
 
 // Start server
@@ -496,6 +684,7 @@ app.listen(PORT, () => {
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📡 Mode: ${isRender ? 'Render (headless)' : 'Local (visible)'}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
+  console.log(`📋 Logging enabled - ${MAX_LOG_ENTRIES} entries retained`);
   console.log('═'.repeat(60) + '\n');
 });
 
