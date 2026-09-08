@@ -23,7 +23,7 @@
         
         .container {
             width: 100%;
-            max-width: 650px;
+            max-width: 750px;
         }
         
         .card {
@@ -101,6 +101,12 @@
             display: none;
         }
         
+        .error .error-details {
+            font-size: 13px;
+            color: #888;
+            margin-top: 6px;
+        }
+        
         .result {
             background: #f8f9fa;
             border-radius: 12px;
@@ -114,9 +120,17 @@
             border-color: #28a745;
         }
         
+        .result.error-result {
+            border-color: #dc3545;
+        }
+        
         .result h3 {
             color: #28a745;
             margin-bottom: 15px;
+        }
+        
+        .result.error-result h3 {
+            color: #dc3545;
         }
         
         .result .info {
@@ -261,6 +275,140 @@
             background: #5a67d8;
         }
         
+        /* Screenshots Section */
+        .screenshots-section {
+            margin-top: 20px;
+            border-top: 2px solid #eee;
+            padding-top: 20px;
+        }
+        
+        .screenshots-section h4 {
+            color: #555;
+            margin-bottom: 12px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .screenshots-section h4 .count {
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            padding: 0 8px;
+            font-size: 11px;
+            line-height: 20px;
+        }
+        
+        .screenshots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        
+        .screenshot-item {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: border-color 0.3s, transform 0.2s;
+            cursor: pointer;
+            background: #fff;
+        }
+        
+        .screenshot-item:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .screenshot-item img {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            display: block;
+        }
+        
+        .screenshot-item .caption {
+            padding: 6px 10px;
+            font-size: 10px;
+            color: #666;
+            background: #f8f9fa;
+            text-align: center;
+            border-top: 1px solid #eee;
+            font-weight: 500;
+        }
+        
+        .screenshot-item .step-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            font-size: 9px;
+            padding: 1px 8px;
+            border-radius: 10px;
+            margin-right: 4px;
+        }
+        
+        /* Screenshot Modal */
+        .screenshot-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.92);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .screenshot-modal.active {
+            display: flex;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .screenshot-modal img {
+            max-width: 90%;
+            max-height: 85%;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        
+        .screenshot-modal .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            transition: transform 0.2s;
+        }
+        
+        .screenshot-modal .close-btn:hover {
+            transform: scale(1.2);
+        }
+        
+        .screenshot-modal .screenshot-info {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ccc;
+            background: rgba(0,0,0,0.6);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+        
         .features {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -324,6 +472,25 @@
             100% { transform: rotate(360deg); }
         }
         
+        /* Source badge */
+        .source-badge {
+            display: inline-block;
+            padding: 2px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .source-badge.service {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .source-badge.snapsave {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
         @media (max-width: 600px) {
             .card { padding: 20px; }
             .input-group { flex-direction: column; }
@@ -332,6 +499,8 @@
             .button-group { flex-direction: column; }
             .result .value { float: none; display: block; max-width: 100%; }
             .result .value.url-value { max-width: 100%; }
+            .screenshots-grid { grid-template-columns: 1fr 1fr; }
+            .screenshot-item img { height: 100px; }
         }
     </style>
 </head>
@@ -356,11 +525,12 @@
             <div id="errorMessage" class="error"></div>
             
             <div id="resultSection" class="result">
-                <h3>✅ Download Ready!</h3>
+                <h3 id="resultTitle">✅ Download Ready!</h3>
                 <div class="info">
                     <div><span class="label">Filename:</span> <span id="filename" class="value"></span></div>
                     <div><span class="label">File Size:</span> <span id="fileSize" class="value"></span></div>
                     <div><span class="label">Download Time:</span> <span id="downloadTime" class="value"></span></div>
+                    <div><span class="label">Source:</span> <span id="source" class="value"></span></div>
                 </div>
                 
                 <div style="margin: 10px 0;">
@@ -377,6 +547,15 @@
                 <div class="button-group">
                     <a id="downloadLink" href="#" class="btn btn-download" target="_blank">⬇️ Download Video</a>
                     <button class="btn btn-copy" onclick="copyUrl()">📋 Copy URL</button>
+                </div>
+                
+                <!-- Screenshots Section -->
+                <div id="screenshotsSection" class="screenshots-section" style="display:none;">
+                    <h4>📸 Debug Screenshots <span class="count" id="screenshotCount">0</span></h4>
+                    <div id="screenshotsGrid" class="screenshots-grid"></div>
+                    <p style="font-size: 11px; color: #999; margin-top: 10px; text-align: center;">
+                        Click any screenshot to enlarge
+                    </p>
                 </div>
                 
                 <button class="btn-reset" onclick="resetForm()">🔄 New Download</button>
@@ -403,17 +582,26 @@
         </div>
     </div>
 
+    <!-- Screenshot Modal -->
+    <div id="screenshotModal" class="screenshot-modal" onclick="closeScreenshotModal()">
+        <button class="close-btn" onclick="closeScreenshotModal()">✕</button>
+        <img id="modalImage" src="" alt="Screenshot">
+        <div id="modalInfo" class="screenshot-info"></div>
+    </div>
+
     <!-- Toast notification -->
     <div id="toast" class="toast">✅ Copied to clipboard!</div>
 
     <script>
         let currentDownloadUrl = '';
+        let screenshots = [];
 
         async function handleDownload() {
             const urlInput = document.getElementById('urlInput');
             const downloadBtn = document.getElementById('downloadBtn');
             const errorDiv = document.getElementById('errorMessage');
             const resultSection = document.getElementById('resultSection');
+            const screenshotsSection = document.getElementById('screenshotsSection');
             
             const url = urlInput.value.trim();
             
@@ -431,6 +619,8 @@
             downloadBtn.innerHTML = '⏳ Downloading...';
             hideError();
             resultSection.style.display = 'none';
+            screenshotsSection.style.display = 'none';
+            screenshots = [];
 
             try {
                 const response = await fetch('/api/download', {
@@ -444,11 +634,24 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Download failed');
+                    // Check if we have screenshots in the error response
+                    if (data.screenshots && data.screenshots.length > 0) {
+                        screenshots = data.screenshots;
+                        showErrorWithScreenshots(data.error || data.message || 'Download failed');
+                    } else {
+                        throw new Error(data.error || 'Download failed');
+                    }
+                    return;
                 }
 
                 if (!data.success) {
-                    throw new Error(data.error || 'Download failed');
+                    if (data.screenshots && data.screenshots.length > 0) {
+                        screenshots = data.screenshots;
+                        showErrorWithScreenshots(data.error || 'Download failed');
+                    } else {
+                        throw new Error(data.error || 'Download failed');
+                    }
+                    return;
                 }
 
                 showResult(data.data);
@@ -463,13 +666,14 @@
 
         function showResult(data) {
             const resultSection = document.getElementById('resultSection');
+            const resultTitle = document.getElementById('resultTitle');
             const filename = document.getElementById('filename');
             const fileSize = document.getElementById('fileSize');
             const downloadTime = document.getElementById('downloadTime');
+            const source = document.getElementById('source');
             const downloadLink = document.getElementById('downloadLink');
             const urlText = document.getElementById('urlText');
 
-            // Use the direct rapidcdn URL - DON'T add the base URL
             const directUrl = data.directDownloadUrl || data.downloadUrl;
             currentDownloadUrl = directUrl;
 
@@ -477,16 +681,98 @@
             fileSize.textContent = data.fileSize;
             downloadTime.textContent = data.downloadTime || 'N/A';
             
-            // Set the download link href to the direct URL (not the local server URL)
+            // Show source with badge
+            const sourceText = data.source || 'Video Service';
+            const sourceBadge = sourceText === 'igvideourl_service' ? 'service' : 'snapsave';
+            source.innerHTML = `<span class="source-badge ${sourceBadge}">${sourceText === 'igvideourl_service' ? '🚀 Video Service' : '📸 Snapsave'}</span>`;
+            
             downloadLink.href = directUrl;
             downloadLink.target = '_blank';
-            
-            // Display the URL in the text box
             urlText.textContent = directUrl;
             
+            resultSection.className = 'result success';
+            resultTitle.textContent = '✅ Download Ready!';
             resultSection.style.display = 'block';
-            resultSection.classList.add('success');
+            
+            // Show screenshots if available
+            if (data.screenshots && data.screenshots.length > 0) {
+                screenshots = data.screenshots;
+                renderScreenshots(screenshots);
+            } else {
+                document.getElementById('screenshotsSection').style.display = 'none';
+            }
+            
             resultSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function showErrorWithScreenshots(message) {
+            const resultSection = document.getElementById('resultSection');
+            const resultTitle = document.getElementById('resultTitle');
+            
+            // Show error in result section with screenshots
+            resultSection.className = 'result error-result';
+            resultTitle.textContent = '❌ Download Failed';
+            resultSection.style.display = 'block';
+            
+            // Show screenshots
+            if (screenshots.length > 0) {
+                renderScreenshots(screenshots);
+            }
+            
+            // Also show in error div
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.innerHTML = `
+                <strong>❌ ${message}</strong>
+                ${screenshots.length > 0 ? `<div class="error-details">📸 ${screenshots.length} screenshots captured for debugging</div>` : ''}
+            `;
+            errorDiv.style.display = 'block';
+            
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function renderScreenshots(screenshotList) {
+            const section = document.getElementById('screenshotsSection');
+            const grid = document.getElementById('screenshotsGrid');
+            const count = document.getElementById('screenshotCount');
+            
+            if (!screenshotList || screenshotList.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            
+            section.style.display = 'block';
+            count.textContent = screenshotList.length;
+            grid.innerHTML = '';
+            
+            screenshotList.forEach((ss, index) => {
+                const item = document.createElement('div');
+                item.className = 'screenshot-item';
+                item.title = `Step ${ss.step}: ${ss.description}`;
+                item.innerHTML = `
+                    <img src="${ss.url}" alt="${ss.description}" loading="lazy" 
+                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22200%22 height=%22150%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2214%22 font-family=%22Arial%22%3E📸%3C/text%3E%3C/svg%3E'"
+                         onclick="openScreenshotModal('${ss.url}', '${ss.step}: ${ss.description}')">
+                    <div class="caption"><span class="step-badge">${ss.step}</span> ${ss.description}</div>
+                `;
+                grid.appendChild(item);
+            });
+        }
+
+        function openScreenshotModal(url, caption) {
+            const modal = document.getElementById('screenshotModal');
+            const img = document.getElementById('modalImage');
+            const info = document.getElementById('modalInfo');
+            
+            img.src = url;
+            img.alt = caption;
+            info.textContent = caption;
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeScreenshotModal() {
+            document.getElementById('screenshotModal').classList.remove('active');
+            document.body.style.overflow = '';
         }
 
         function copyUrl() {
@@ -495,7 +781,6 @@
                 return;
             }
 
-            // Try using the modern Clipboard API
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(currentDownloadUrl)
                     .then(() => {
@@ -569,22 +854,41 @@
             const urlInput = document.getElementById('urlInput');
             const resultSection = document.getElementById('resultSection');
             const errorDiv = document.getElementById('errorMessage');
+            const screenshotsSection = document.getElementById('screenshotsSection');
             
             urlInput.value = '';
             resultSection.style.display = 'none';
             errorDiv.style.display = 'none';
+            screenshotsSection.style.display = 'none';
             currentDownloadUrl = '';
+            screenshots = [];
             urlInput.focus();
+            closeScreenshotModal();
         }
 
+        // Keyboard shortcuts
         document.getElementById('urlInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 handleDownload();
             }
         });
 
+        // Close modal with ESC
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeScreenshotModal();
+            }
+        });
+
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('urlInput').focus();
+        });
+
+        // Handle click outside modal to close
+        document.getElementById('screenshotModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeScreenshotModal();
+            }
         });
     </script>
 </body>

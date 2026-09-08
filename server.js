@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,8 +12,8 @@ app.set('trust proxy', 1);
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -36,39 +35,119 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
   console.log('📁 Created downloads directory');
 }
 
-// Clean up old downloads (files older than 1 hour)
-setInterval(() => {
-  try {
-    const files = fs.readdirSync(DOWNLOAD_DIR);
-    const now = Date.now();
-    let deletedCount = 0;
-    files.forEach(file => {
-      const filepath = path.join(DOWNLOAD_DIR, file);
-      try {
-        const stats = fs.statSync(filepath);
-        if (now - stats.mtimeMs > 3600000) { // 1 hour
-          fs.unlinkSync(filepath);
-          deletedCount++;
-          console.log(`🗑️ Deleted old file: ${file}`);
-        }
-      } catch (err) {
-        // File might have been deleted already
-      }
-    });
-    if (deletedCount > 0) {
-      console.log(`🧹 Cleaned up ${deletedCount} old files`);
-    }
-  } catch (error) {
-    console.error('Cleanup error:', error.message);
-  }
-}, 3600000); // Run every hour
+// ============== DEBUG SCREENSHOTS DIRECTORY ==============
+const DEBUG_DIR = path.join(__dirname, 'debug_screenshots');
+if (!fs.existsSync(DEBUG_DIR)) {
+  fs.mkdirSync(DEBUG_DIR, { recursive: true });
+  console.log('📸 Created debug screenshots directory');
+}
 
-// Store active browser instance
+// ============== VIDEO URL GETTER SERVICE ==============
+const VIDEO_SERVICE_URL = 'https://igvideourl.onrender.com/api/download';
+
+// ============== CAPTURE SCREENSHOT FUNCTION ==============
+
+async function captureScreenshot(page, step, description) {
+  try {
+    const timestamp = Date.now();
+    const filename = `${timestamp}_${step}.png`;
+    const filepath = path.join(DEBUG_DIR, filename);
+    await page.screenshot({ 
+      path: filepath,
+      fullPage: true,
+      type: 'png'
+    });
+    console.log(`📸 Screenshot saved: ${filename} (${description})`);
+    return {
+      filename: filename,
+      filepath: filepath,
+      url: `/debug-screenshots/${filename}`,
+      step: step,
+      description: description,
+      timestamp: timestamp
+    };
+  } catch (e) {
+    console.log(`⚠️ Could not take screenshot at step ${step}: ${e.message}`);
+    return null;
+  }
+}
+
+// ============== PRIMARY: DOWNLOAD VIA VIDEO URL SERVICE ==============
+
+async function downloadViaVideoService(instagramUrl) {
+  console.log('🔄 Using Instagram video URL getter service...');
+  
+  try {
+    const response = await fetch(VIDEO_SERVICE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: instagramUrl }),
+      signal: AbortSignal.timeout(30000)
+    });
+    
+    if (!response.ok) {
+      console.log(`⚠️ Service returned ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    console.log('📊 Service response received');
+    
+    if (data.success && data.data) {
+      const videoData = data.data;
+      const downloadUrl = videoData.downloadUrl || videoData.directDownloadUrl;
+      
+      if (downloadUrl && (downloadUrl.includes('.mp4') || downloadUrl.includes('video'))) {
+        console.log(`✅ Got video URL from service: ${downloadUrl.substring(0, 80)}...`);
+        
+        const filename = videoData.filename || `video_${Date.now()}.mp4`;
+        
+        console.log(`📥 Downloading video...`);
+        const videoResponse = await fetch(downloadUrl);
+        if (!videoResponse.ok) {
+          throw new Error(`HTTP ${videoResponse.status}: ${videoResponse.statusText}`);
+        }
+        
+        const buffer = Buffer.from(await videoResponse.arrayBuffer());
+        const filepath = path.join(DOWNLOAD_DIR, filename);
+        fs.writeFileSync(filepath, buffer);
+        
+        const stats = fs.statSync(filepath);
+        const actualSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+        
+        console.log(`✅ Video downloaded: ${filename} (${actualSizeMB} MB)`);
+        
+        return {
+          success: true,
+          filename: filename,
+          downloadUrl: downloadUrl,
+          directDownloadUrl: downloadUrl,
+          fileSize: `${actualSizeMB} MB`,
+          originalUrl: instagramUrl,
+          isDirectUrl: true,
+          source: 'igvideourl_service',
+          localPath: filepath,
+          screenshots: []
+        };
+      }
+    }
+    
+    console.log('⚠️ Service did not return a valid video URL');
+    return null;
+  } catch (error) {
+    console.log(`⚠️ Service error: ${error.message}`);
+    return null;
+  }
+}
+
+// ============== SECONDARY: DOWNLOAD VIA SNAPSAVE (FALLBACK) ==============
+
+const { chromium } = require('playwright');
+
 let browser = null;
 let browserInitPromise = null;
 let isBrowserReady = false;
 
-// Initialize browser
 async function initBrowser() {
   if (browser && isBrowserReady) {
     return browser;
@@ -84,7 +163,6 @@ async function initBrowser() {
       
       let executablePath = null;
       
-      // Check if we're on Render
       if (process.env.RENDER) {
         const renderPaths = [
           '/usr/bin/google-chrome',
@@ -102,27 +180,6 @@ async function initBrowser() {
         
         if (!executablePath) {
           console.log('⚠️ No Chrome found on Render, using Playwright default');
-        }
-      } else {
-        // Local development - try to find Chromium
-        const basePath = path.join(process.env.USERPROFILE || process.env.HOME, 'AppData', 'Local', 'ms-playwright');
-        if (fs.existsSync(basePath)) {
-          const dirs = fs.readdirSync(basePath)
-            .filter(dir => dir.startsWith('chromium-'))
-            .sort((a, b) => {
-              const numA = parseInt(a.split('-')[1]);
-              const numB = parseInt(b.split('-')[1]);
-              return numB - numA;
-            });
-
-          for (const dir of dirs) {
-            const chromePath = path.join(basePath, dir, 'chrome-win64', 'chrome.exe');
-            if (fs.existsSync(chromePath)) {
-              executablePath = chromePath;
-              console.log(`✅ Found Chromium: ${dir}`);
-              break;
-            }
-          }
         }
       }
 
@@ -156,261 +213,199 @@ async function initBrowser() {
   return browserInitPromise;
 }
 
-// Handle ads function
 async function handleAds(page) {
   try {
     console.log('🔍 Checking for ads...');
-    let adClosed = false;
     
-    const adCloseMethods = [
-      // Method 1: Role-based close button
-      async () => {
-        try {
-          const closeBtn = page.getByRole('button', { name: 'Close' });
-          if (await closeBtn.isVisible({ timeout: 2000 })) {
-            await closeBtn.click();
-            console.log('✅ Ad closed via role button');
-            return true;
-          }
-        } catch {}
-        return false;
-      },
-      // Method 2: Text-based close button
-      async () => {
-        try {
-          const closeBtn = page.locator('button:has-text("Close"), button:has-text("close"), button:has-text("×"), button:has-text("X")');
-          if (await closeBtn.isVisible({ timeout: 2000 })) {
-            await closeBtn.first().click();
-            console.log('✅ Ad closed via text button');
-            return true;
-          }
-        } catch {}
-        return false;
-      },
-      // Method 3: Click outside ad
-      async () => {
-        try {
-          const adContent = page.locator('#ad-content, .ad-container, [class*="ad-"], [id*="ad-"]');
-          if (await adContent.isVisible({ timeout: 2000 })) {
-            await page.click('body', { position: { x: 10, y: 10 } });
-            console.log('✅ Ad dismissed by clicking outside');
-            return true;
-          }
-        } catch {}
-        return false;
-      },
-      // Method 4: ESC key
-      async () => {
-        try {
-          await page.keyboard.press('Escape');
-          console.log('✅ Pressed ESC to dismiss ad');
-          return true;
-        } catch {}
-        return false;
-      }
-    ];
-
-    for (const method of adCloseMethods) {
-      try {
-        if (await method()) {
-          adClosed = true;
-          await page.waitForTimeout(1000);
-          break;
-        }
-      } catch (error) {
-        // Continue to next method
-      }
-    }
-
-    if (!adClosed) {
-      console.log('ℹ️ No ads detected or ads already closed');
-    }
+    try {
+      await page.keyboard.press('Escape');
+      console.log('✅ Pressed ESC to dismiss ad');
+    } catch {}
     
-    return adClosed;
+    try {
+      const closeBtn = page.getByRole('button', { name: 'Close' });
+      if (await closeBtn.isVisible({ timeout: 2000 })) {
+        await closeBtn.click();
+        console.log('✅ Ad closed via role button');
+      }
+    } catch {}
+    
+    try {
+      const closeBtn = page.locator('button:has-text("Close"), button:has-text("close")');
+      if (await closeBtn.isVisible({ timeout: 2000 })) {
+        await closeBtn.first().click();
+        console.log('✅ Ad closed via text button');
+      }
+    } catch {}
+    
+    return true;
   } catch (error) {
-    console.log('ℹ️ Ad handling completed');
     return false;
   }
 }
 
-// Download video function
-async function downloadVideo(instagramUrl) {
+async function downloadViaSnapsave(instagramUrl) {
+  console.log('🔄 Trying snapsave.app as fallback...');
+  
   let page = null;
   const startTime = Date.now();
+  const screenshots = [];
   
   try {
-    console.log(`📥 Processing: ${instagramUrl}`);
-    
     const browserInstance = await initBrowser();
     page = await browserInstance.newPage();
     await page.setViewportSize({ width: 1366, height: 768 });
-    page.setDefaultTimeout(30000);
+    page.setDefaultTimeout(45000);
 
-    // Navigate to snapsave.app
+    // Step 1: Navigate to snapsave
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
     await page.waitForTimeout(2000);
+    const ss1 = await captureScreenshot(page, '01_initial_page', 'Snapsave initial page');
+    if (ss1) screenshots.push(ss1);
 
-    // Handle initial ads
+    // Step 2: Handle ads
     await handleAds(page);
+    const ss2 = await captureScreenshot(page, '02_after_ads', 'After handling ads');
+    if (ss2) screenshots.push(ss2);
 
-    // Enter URL
+    // Step 3: Enter URL
     console.log('✏️ Entering URL...');
-    const urlInput = page.getByRole('textbox', { name: 'Url' });
-    await urlInput.fill(instagramUrl);
-    await page.waitForTimeout(500);
+    try {
+      const urlInput = page.getByRole('textbox', { name: 'Url' });
+      await urlInput.fill(instagramUrl);
+      await page.waitForTimeout(500);
+    } catch (error) {
+      const urlInput = page.locator('input[type="text"], input[placeholder*="Url"]');
+      await urlInput.first().fill(instagramUrl);
+      await page.waitForTimeout(500);
+    }
+    const ss3 = await captureScreenshot(page, '03_url_filled', 'URL filled in input');
+    if (ss3) screenshots.push(ss3);
 
-    // Click download button
+    // Step 4: Click download
     console.log('🔄 Clicking download button...');
-    const downloadBtn = page.getByRole('button', { name: 'Download' });
-    await downloadBtn.click();
-    await page.waitForTimeout(6000);
+    try {
+      const downloadBtn = page.getByRole('button', { name: 'Download' });
+      await downloadBtn.click();
+      await page.waitForTimeout(3000);
+    } catch (error) {
+      const downloadBtn = page.locator('button:has-text("Download"), input[value="Download"]');
+      await downloadBtn.first().click();
+      await page.waitForTimeout(3000);
+    }
+    const ss4 = await captureScreenshot(page, '04_after_click', 'After clicking download');
+    if (ss4) screenshots.push(ss4);
 
-    // Handle ads after click
+    // Step 5: Handle ads after click
     await handleAds(page);
+    const ss5 = await captureScreenshot(page, '05_after_ads_2', 'After second ads');
+    if (ss5) screenshots.push(ss5);
 
-    // Wait for download link
+    // Step 6: Wait and find download link
     console.log('⏳ Waiting for download link...');
+    await page.waitForTimeout(2000);
+    const ss6 = await captureScreenshot(page, '06_waiting_for_link', 'Waiting for download link');
+    if (ss6) screenshots.push(ss6);
     
-    const downloadLinkSelectors = [
-      'a[onclick*="showAd"][href*="rapidcdn"]',
-      'a:has-text("Download video")',
-      'a:has-text("Download")',
-      'a[download]',
-      '.download-link',
-      '[class*="download"] a'
-    ];
-    
-    let downloadLink = null;
-    let usedSelector = null;
     let rapidCdnUrl = null;
     
-    // First try to find the link with rapidcdn in href
-    for (const selector of downloadLinkSelectors) {
-      try {
-        const element = page.locator(selector).first();
-        if (await element.isVisible({ timeout: 3000 })) {
-          downloadLink = element;
-          usedSelector = selector;
-          console.log(`✅ Found download link using selector: ${selector}`);
-          
-          // Get the href which contains the rapidcdn URL
-          const href = await downloadLink.getAttribute('href');
-          if (href && href.includes('rapidcdn')) {
-            rapidCdnUrl = href;
-            console.log('✅ Found rapidcdn URL in href');
-            break;
-          }
-        }
-      } catch {}
-    }
-
-    // If we didn't find it with the selectors, try a more generic approach
-    if (!downloadLink) {
-      try {
-        const allLinks = await page.locator('a').all();
-        for (const link of allLinks) {
-          const href = await link.getAttribute('href');
-          if (href && href.includes('rapidcdn')) {
-            downloadLink = link;
-            rapidCdnUrl = href;
-            usedSelector = 'generic link search';
-            console.log('✅ Found rapidcdn URL via generic search');
-            break;
-          }
-        }
-      } catch {}
-    }
-
-    // If still no link, try to get URL from onclick attribute
-    if (!rapidCdnUrl && downloadLink) {
-      try {
-        const onclickAttr = await downloadLink.getAttribute('onclick');
-        if (onclickAttr) {
-          const urlMatch = onclickAttr.match(/https?:\/\/[^"']+/);
-          if (urlMatch) {
-            rapidCdnUrl = urlMatch[0];
-            console.log('✅ Found rapidcdn URL in onclick attribute');
-          }
-        }
-      } catch {}
-    }
-
-    // If still no URL, try to find any link with rapidcdn in the page
-    if (!rapidCdnUrl) {
-      try {
-        const rapidLinks = await page.locator('a[href*="rapidcdn"]').all();
-        for (const link of rapidLinks) {
-          const href = await link.getAttribute('href');
-          if (href && href.includes('rapidcdn')) {
-            rapidCdnUrl = href;
-            console.log('✅ Found rapidcdn URL via direct link search');
-            break;
-          }
-        }
-      } catch {}
-    }
-
-    if (!rapidCdnUrl) {
-      throw new Error('Could not find rapidcdn download URL');
-    }
-
-    console.log('✅ RapidCDN URL found');
-
-    // Get suggested filename from the URL
-    let filename = 'video.mp4';
+    // Try to find Instagram download link
     try {
-      const filenameMatch = rapidCdnUrl.match(/filename=([^&]+)/);
-      if (filenameMatch) {
-        filename = decodeURIComponent(filenameMatch[1]);
+      const instagramLinks = await page.$$eval('a', (links) => 
+        links
+          .filter(link => {
+            const text = link.textContent?.toLowerCase() || '';
+            const href = link.href || '';
+            return (text.includes('instagram') || href.includes('instagram')) && 
+                   (text.includes('download') || href.includes('download'));
+          })
+          .map(link => link.href)
+      );
+      
+      if (instagramLinks.length > 0) {
+        rapidCdnUrl = instagramLinks[0];
+        console.log(`✅ Found Instagram download link: ${rapidCdnUrl?.substring(0, 80)}...`);
+        const ss7 = await captureScreenshot(page, '07_instagram_link_found', 'Instagram link found');
+        if (ss7) screenshots.push(ss7);
       }
-    } catch {}
+    } catch (error) {}
 
-    // Clean filename
-    filename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-    if (!filename.endsWith('.mp4')) {
-      filename = `video_${Date.now()}.mp4`;
+    // If no Instagram link, try rapidcdn
+    if (!rapidCdnUrl) {
+      try {
+        const rapidLinks = await page.$$eval('a[href*="rapidcdn"]', (links) => 
+          links.map(link => link.href)
+        );
+        if (rapidLinks.length > 0) {
+          rapidCdnUrl = rapidLinks[0];
+          console.log(`✅ Found rapidcdn link: ${rapidCdnUrl?.substring(0, 80)}...`);
+          const ss8 = await captureScreenshot(page, '08_rapidcdn_found', 'RapidCDN link found');
+          if (ss8) screenshots.push(ss8);
+        }
+      } catch (error) {}
     }
 
-    const filepath = path.join(DOWNLOAD_DIR, filename);
+    // If no link found, capture the final state
+    if (!rapidCdnUrl) {
+      const ssError = await captureScreenshot(page, '99_no_link_found', 'No download link found');
+      if (ssError) screenshots.push(ssError);
+      throw new Error('Could not find Instagram download URL');
+    }
 
-    // Download the video using the rapidcdn URL
-    console.log(`📥 Downloading video from rapidcdn...`);
-    
-    // Use fetch to download the video
+    console.log('✅ Download URL found');
+    const ssSuccess = await captureScreenshot(page, '10_success', 'Download URL found');
+    if (ssSuccess) screenshots.push(ssSuccess);
+
+    // Download the video
+    console.log(`📥 Downloading video...`);
     const response = await fetch(rapidCdnUrl);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
     const buffer = Buffer.from(await response.arrayBuffer());
+    const filename = `video_${Date.now()}.mp4`;
+    const filepath = path.join(DOWNLOAD_DIR, filename);
     fs.writeFileSync(filepath, buffer);
 
     const stats = fs.statSync(filepath);
-    const fileSizeMB = stats.size / (1024 * 1024);
+    const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
     const downloadTime = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log(`✅ Video downloaded: ${filename} (${fileSizeMB.toFixed(2)} MB) in ${downloadTime}s`);
+    console.log(`✅ Video downloaded: ${filename} (${fileSizeMB} MB) in ${downloadTime}s`);
 
-    // Return the rapidcdn URL directly
     return {
       success: true,
       filename: filename,
-      downloadUrl: rapidCdnUrl,  // This is the rapidcdn URL
+      downloadUrl: rapidCdnUrl,
       directDownloadUrl: rapidCdnUrl,
-      fileSize: `${fileSizeMB.toFixed(2)} MB`,
+      fileSize: `${fileSizeMB} MB`,
       downloadTime: `${downloadTime}s`,
       originalUrl: instagramUrl,
       isDirectUrl: true,
-      localPath: filepath
+      source: 'snapsave_app',
+      localPath: filepath,
+      screenshots: screenshots
     };
 
   } catch (error) {
-    console.error('❌ Download error:', error.message);
-    throw error;
+    // Capture error screenshot
+    if (page) {
+      try {
+        const ssError = await captureScreenshot(page, 'error_state', 'Error state');
+        if (ssError) screenshots.push(ssError);
+      } catch (e) {}
+    }
+    
+    // Include screenshots in the error
+    const err = new Error(error.message);
+    err.screenshots = screenshots;
+    throw err;
+    
   } finally {
     if (page) {
       await page.close();
@@ -419,7 +414,50 @@ async function downloadVideo(instagramUrl) {
   }
 }
 
-// API Routes
+// ============== MAIN DOWNLOAD FUNCTION ==============
+
+async function downloadVideo(instagramUrl) {
+  console.log(`\n📥 Processing: ${instagramUrl}`);
+  
+  // ✅ METHOD 1: Use your existing video service (PRIMARY)
+  console.log('\n🔄 Method 1: Using video URL getter service...');
+  try {
+    const result = await downloadViaVideoService(instagramUrl);
+    if (result && result.success) {
+      console.log('✅ Successfully downloaded via video service!');
+      return result;
+    }
+    console.log('⚠️ Video service failed, trying fallback...');
+  } catch (error) {
+    console.log(`⚠️ Video service error: ${error.message}`);
+  }
+  
+  // ✅ METHOD 2: Fallback to snapsave (SECONDARY)
+  console.log('\n🔄 Method 2: Trying snapsave fallback...');
+  try {
+    const result = await downloadViaSnapsave(instagramUrl);
+    if (result && result.success) {
+      console.log('✅ Successfully downloaded via snapsave!');
+      return result;
+    }
+  } catch (error) {
+    console.log(`⚠️ Snapsave error: ${error.message}`);
+    // Return the error with screenshots
+    if (error.screenshots && error.screenshots.length > 0) {
+      throw error;
+    }
+  }
+  
+  // ❌ All methods failed
+  console.log('\n❌ All download methods failed');
+  throw new Error('Could not download video from any source');
+}
+
+// ============== SERVE DEBUG SCREENSHOTS ==============
+app.use('/debug-screenshots', express.static(DEBUG_DIR));
+
+// ============== API ROUTES ==============
+
 app.post('/api/download', async (req, res) => {
   try {
     const { url } = req.body;
@@ -431,7 +469,6 @@ app.post('/api/download', async (req, res) => {
       });
     }
 
-    // Validate Instagram URL
     if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
       return res.status(400).json({ 
         success: false,
@@ -448,15 +485,27 @@ app.post('/api/download', async (req, res) => {
     
     res.json({
       success: true,
-      data: result
+      data: {
+        ...result,
+        screenshots: result.screenshots || []
+      }
     });
 
   } catch (error) {
     console.error('❌ API Error:', error.message);
-    res.status(500).json({
+    
+    // Include screenshots in error response
+    const response = {
       success: false,
       error: error.message || 'Failed to download video. Please try again.'
-    });
+    };
+    
+    if (error.screenshots && error.screenshots.length > 0) {
+      response.screenshots = error.screenshots;
+      response.message = `Failed: ${error.message}. See screenshots for debugging.`;
+    }
+    
+    res.status(500).json(response);
   }
 });
 
@@ -469,84 +518,22 @@ app.get('/', (req, res) => {
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Instagram Video Downloader</title>
-          <style>
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-            .container { background: #f5f5f5; padding: 30px; border-radius: 10px; }
-            input, button { padding: 10px; margin: 10px 0; width: 100%; }
-            button { background: #4CAF50; color: white; border: none; cursor: pointer; }
-            button:hover { background: #45a049; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>📱 Instagram Video Downloader</h1>
-            <p>Enter an Instagram video URL to download</p>
-            <input type="text" id="urlInput" placeholder="https://www.instagram.com/p/...">
-            <button onclick="downloadVideo()">Download</button>
-            <div id="result"></div>
-          </div>
-          <script>
-            async function downloadVideo() {
-              const url = document.getElementById('urlInput').value;
-              const resultDiv = document.getElementById('result');
-              if (!url) { resultDiv.innerHTML = 'Please enter a URL'; return; }
-              resultDiv.innerHTML = '⏳ Downloading...';
-              try {
-                const response = await fetch('/api/download', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ url })
-                });
-                const data = await response.json();
-                if (data.success) {
-                  resultDiv.innerHTML = \`
-                    ✅ Download ready!<br>
-                    <a href="\${data.data.downloadUrl}" target="_blank">Download Video</a><br>
-                    Size: \${data.data.fileSize}<br>
-                    Filename: \${data.data.filename}<br>
-                    <button onclick="navigator.clipboard.writeText('\${data.data.downloadUrl}')">Copy URL</button>
-                  \`;
-                } else {
-                  resultDiv.innerHTML = '❌ Error: ' + data.error;
-                }
-              } catch (error) {
-                resultDiv.innerHTML = '❌ Error: ' + error.message;
-              }
-            }
-          </script>
-        </body>
-      </html>
-    `);
+    res.sendFile(path.join(__dirname, 'index.html'));
   }
 });
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
-  const health = {
+  res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    browserReady: isBrowserReady,
     downloadDir: DOWNLOAD_DIR,
-    downloadCount: fs.existsSync(DOWNLOAD_DIR) ? fs.readdirSync(DOWNLOAD_DIR).length : 0
-  };
-  
-  try {
-    if (browser) {
-      const version = await browser.version();
-      health.browserVersion = version;
-    }
-  } catch (e) {
-    health.browserVersion = 'unavailable';
-  }
-  
-  res.json(health);
+    debugDir: DEBUG_DIR,
+    downloadCount: fs.existsSync(DOWNLOAD_DIR) ? fs.readdirSync(DOWNLOAD_DIR).length : 0,
+    screenshotCount: fs.existsSync(DEBUG_DIR) ? fs.readdirSync(DEBUG_DIR).length : 0
+  });
 });
 
 // 404 handler
@@ -573,6 +560,8 @@ app.listen(PORT, () => {
   console.log('═'.repeat(60));
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📍 Local: http://localhost:${PORT}`);
+  console.log(`📤 Video Service: ${VIDEO_SERVICE_URL}`);
+  console.log(`📸 Debug Screenshots: ${DEBUG_DIR}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
   console.log('═'.repeat(60) + '\n');
 });
@@ -604,11 +593,6 @@ process.on('SIGTERM', async () => {
   }
   console.log('👋 Goodbye!');
   process.exit(0);
-});
-
-// Unhandled rejection handler
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 module.exports = app;
