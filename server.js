@@ -38,14 +38,17 @@ if (!fs.existsSync(DEBUG_DIR)) {
 // ============== VERCEL WEBHOOK URL ==============
 const VERCEL_WEBHOOK_URL = 'https://fetchgram-one.vercel.app/api/webhook/caption';
 
-// ============== CAPTURE SCREENSHOT (DISABLE FOR SPEED) ==============
+// ============== ACTIVE REQUESTS TRACKING ==============
+let activeRequests = 0;
+let isShuttingDown = false;
+
+// ============== CAPTURE SCREENSHOT ==============
 
 let screenshotCounter = 0;
-const MAX_SCREENSHOTS = 5; // Only capture first 5 screenshots for debugging
+const MAX_SCREENSHOTS = 3;
 
 async function captureScreenshot(page, step, description) {
-  // ✅ Only capture limited screenshots to save time
-  if (screenshotCounter >= MAX_SCREENSHOTS) {
+  if (screenshotCounter >= MAX_SCREENSHOTS || isShuttingDown) {
     return null;
   }
   
@@ -59,7 +62,7 @@ async function captureScreenshot(page, step, description) {
       fullPage: true,
       type: 'png'
     });
-    console.log(`📸 Screenshot saved: ${filename} (${description})`);
+    console.log(`📸 Screenshot saved: ${filename}`);
     return {
       filename: filename,
       filepath: filepath,
@@ -69,7 +72,6 @@ async function captureScreenshot(page, step, description) {
       timestamp: timestamp
     };
   } catch (e) {
-    console.log(`⚠️ Could not take screenshot: ${e.message}`);
     return null;
   }
 }
@@ -83,7 +85,7 @@ let browserInitPromise = null;
 let isBrowserReady = false;
 
 async function initBrowser() {
-  if (browser && isBrowserReady) return browser;
+  if (browser && isBrowserReady && !isShuttingDown) return browser;
   if (browserInitPromise) return browserInitPromise;
 
   browserInitPromise = (async () => {
@@ -139,11 +141,10 @@ async function initBrowser() {
   return browserInitPromise;
 }
 
-// ============== HANDLE ADS (SIMPLIFIED) ==============
+// ============== HANDLE ADS ==============
 
 async function handleAds(page) {
   try {
-    // ✅ Only try ESC key - fastest method
     await page.keyboard.press('Escape');
     return true;
   } catch (error) {
@@ -151,7 +152,7 @@ async function handleAds(page) {
   }
 }
 
-// ============== SEND TO VERCEL WEBHOOK ==============
+// ============== SEND TO VERCEL ==============
 
 async function sendToVercel(instagramUrl, videoUrl, caption) {
     try {
@@ -189,7 +190,7 @@ async function sendToVercel(instagramUrl, videoUrl, caption) {
     }
 }
 
-// ============== SPEED OPTIMIZED DOWNLOAD ==============
+// ============== DOWNLOAD VIA SNAPSAVE ==============
 
 async function downloadViaSnapsave(instagramUrl) {
   console.log('📥 Processing via snapsave.app...');
@@ -200,35 +201,40 @@ async function downloadViaSnapsave(instagramUrl) {
   let caption = '';
   
   try {
+    // ✅ Check if shutting down
+    if (isShuttingDown) {
+      throw new Error('Server is shutting down');
+    }
+    
     const browserInstance = await initBrowser();
     page = await browserInstance.newPage();
     await page.setViewportSize({ width: 1366, height: 768 });
-    page.setDefaultTimeout(30000); // ✅ Reduced from 60s to 30s
+    page.setDefaultTimeout(45000);
 
-    // ✅ Step 1: Navigate with faster wait
+    // Step 1: Navigate
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
-      timeout: 20000 // ✅ Reduced from 30s to 15s
+      timeout: 15000
     });
-    await page.waitForTimeout(1000); // ✅ Reduced from 3000ms to 1000ms
+    await page.waitForTimeout(1500);
 
-    // ✅ Step 2: Handle ads (fast)
+    // Step 2: Handle ads
     await handleAds(page);
 
-    // ✅ Step 3: Enter URL (faster)
+    // Step 3: Enter URL
     console.log('✏️ Entering URL...');
     try {
       const urlInput = page.getByRole('textbox', { name: 'Url' });
       await urlInput.fill(instagramUrl);
-      await page.waitForTimeout(300); // ✅ Reduced from 1000ms to 300ms
+      await page.waitForTimeout(500);
     } catch (error) {
       const urlInput = page.locator('input[type="text"], input[placeholder*="Url"]');
       await urlInput.first().fill(instagramUrl);
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500);
     }
 
-    // ✅ Step 4: Click download
+    // Step 4: Click download
     console.log('🔄 Clicking download button...');
     try {
       const downloadBtn = page.getByRole('button', { name: 'Download' });
@@ -238,24 +244,24 @@ async function downloadViaSnapsave(instagramUrl) {
       await downloadBtn.first().click();
     }
     
-    // ✅ Step 5: Wait shorter for thumbnail
+    // Step 5: Wait for thumbnail
     console.log('⏳ Waiting for thumbnail...');
     try {
       await page.waitForSelector('img[alt*="Download"], img[src*="rapidcdn"]', { 
-        timeout: 10000 // ✅ Reduced from 30s to 10s
+        timeout: 8000
       });
     } catch (error) {
       console.log('⚠️ Thumbnail not found, continuing...');
     }
     
-    await page.waitForTimeout(1500); // ✅ Reduced from 3000ms to 1500ms
+    await page.waitForTimeout(1500);
 
-    // ✅ Step 6: Find link with ONE combined method
+    // Step 6: Find video link
     console.log('🔍 Finding video link...');
     
     let rapidCdnUrl = null;
 
-    // ✅ Combined search - one pass only
+    // Search for rapidcdn links
     const allLinks = await page.$$eval('a', (links) => 
       links
         .filter(link => {
@@ -268,8 +274,8 @@ async function downloadViaSnapsave(instagramUrl) {
         .map(link => link.href)
     );
     
-    // ✅ Try Instagram button if no rapidcdn found
     if (allLinks.length === 0) {
+      // Try Instagram button
       try {
         const instagramBtn = page.locator('a:has-text("Download Video Instagram")');
         if (await instagramBtn.isVisible({ timeout: 3000 })) {
@@ -290,7 +296,6 @@ async function downloadViaSnapsave(instagramUrl) {
         }
       } catch (error) {}
     } else {
-      // Use first valid link
       rapidCdnUrl = allLinks[0];
     }
 
@@ -300,7 +305,7 @@ async function downloadViaSnapsave(instagramUrl) {
 
     console.log(`✅ Instagram video URL found`);
 
-    // ✅ Step 7: Get caption (faster)
+    // Step 7: Get caption
     try {
       const captionEl = await page.locator('.caption, .description, [class*="caption"]').first();
       if (await captionEl.isVisible({ timeout: 1000 })) {
@@ -314,7 +319,7 @@ async function downloadViaSnapsave(instagramUrl) {
       }
     } catch (error) {}
 
-    // ✅ Step 8: Download video
+    // Step 8: Download video
     console.log(`📥 Downloading video...`);
     const response = await fetch(rapidCdnUrl);
     if (!response.ok) {
@@ -348,15 +353,16 @@ async function downloadViaSnapsave(instagramUrl) {
     };
 
   } catch (error) {
-    if (page) {
-      await page.close();
-    }
-    const err = new Error(error.message);
-    throw err;
+    console.error(`❌ Download error: ${error.message}`);
+    throw error;
   } finally {
     if (page) {
-      await page.close();
-      console.log('🔒 Page closed');
+      try {
+        await page.close();
+        console.log('🔒 Page closed');
+      } catch (e) {
+        console.log('⚠️ Page already closed');
+      }
     }
   }
 }
@@ -371,9 +377,7 @@ async function downloadVideo(instagramUrl) {
     
     if (result && result.success) {
       console.log(`✅ Video downloaded successfully!`);
-      
       await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
-      
       return result;
     }
     
@@ -388,10 +392,14 @@ async function downloadVideo(instagramUrl) {
 // ============== API ROUTES ==============
 
 app.post('/api/download', async (req, res) => {
+  // ✅ Increment active requests
+  activeRequests++;
+  
   try {
     const { url } = req.body;
     
     if (!url) {
+      activeRequests--;
       return res.status(400).json({ 
         success: false,
         error: 'URL is required' 
@@ -399,6 +407,7 @@ app.post('/api/download', async (req, res) => {
     }
 
     if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
+      activeRequests--;
       return res.status(400).json({ 
         success: false,
         error: 'Please provide a valid Instagram URL' 
@@ -423,6 +432,9 @@ app.post('/api/download', async (req, res) => {
       success: false,
       error: error.message || 'Failed to download video. Please try again.'
     });
+  } finally {
+    // ✅ Decrement active requests
+    activeRequests--;
   }
 });
 
@@ -440,6 +452,8 @@ app.get('/health', async (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    active_requests: activeRequests,
+    is_shutting_down: isShuttingDown,
     memory: process.memoryUsage(),
     downloadDir: DOWNLOAD_DIR,
     debugDir: DEBUG_DIR,
@@ -465,6 +479,46 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ============== GRACEFUL SHUTDOWN ==============
+
+async function gracefulShutdown(signal) {
+  console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
+  isShuttingDown = true;
+  
+  // Wait for active requests to finish (max 30 seconds)
+  let waitCount = 0;
+  while (activeRequests > 0 && waitCount < 30) {
+    console.log(`⏳ Waiting for ${activeRequests} active requests to complete...`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    waitCount++;
+  }
+  
+  if (activeRequests > 0) {
+    console.log(`⚠️ ${activeRequests} requests still active, forcing shutdown...`);
+  }
+  
+  if (browser) {
+    try {
+      await browser.close();
+      console.log('🔒 Browser closed');
+    } catch (e) {
+      console.log('⚠️ Error closing browser:', e.message);
+    }
+  }
+  
+  console.log('👋 Goodbye!');
+  process.exit(0);
+}
+
+// Shutdown handlers
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Unhandled rejection handler
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection:', reason);
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
@@ -473,27 +527,6 @@ app.listen(PORT, () => {
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
   console.log('═'.repeat(60) + '\n');
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down...');
-  if (browser) {
-    try {
-      await browser.close();
-    } catch (e) {}
-  }
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 Shutting down...');
-  if (browser) {
-    try {
-      await browser.close();
-    } catch (e) {}
-  }
-  process.exit(0);
 });
 
 module.exports = app;
