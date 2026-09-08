@@ -268,7 +268,7 @@ async function downloadViaSnapsave(instagramUrl) {
       console.log('✅ Download button clicked (fallback)');
     }
     
-    // ⏳ CRITICAL: Wait for the thumbnail to load
+    // ⏳ Wait for thumbnail to load
     console.log('⏳ Waiting for thumbnail to load...');
     try {
       await page.waitForSelector('img[alt*="Download"], img[alt*="SnapX"], img[src*="rapidcdn"]', { 
@@ -289,120 +289,139 @@ async function downloadViaSnapsave(instagramUrl) {
     const ss5 = await captureScreenshot(page, '05_after_ads_2', 'After second ads');
     if (ss5) screenshots.push(ss5);
 
-    // Step 6: Find the download link
-    console.log('🔍 Looking for download link...');
+    // Step 6: Find the download link - INSTAGRAM ONLY
+    console.log('🔍 Looking for Instagram video download link...');
     await page.waitForTimeout(2000);
     const ss6 = await captureScreenshot(page, '06_looking_for_link', 'Looking for download link');
     if (ss6) screenshots.push(ss6);
     
     let rapidCdnUrl = null;
-    
-    // 🔥 METHOD 1: Look for the "Download video" span or link
+
+    // ✅ METHOD 1: Instagram-specific links (exclude Facebook)
     try {
-      console.log('🔍 Method 1: Looking for "Download video" text...');
-      const downloadSpan = await page.locator('span:has-text("Download video")').first();
-      if (await downloadSpan.isVisible({ timeout: 5000 })) {
-        const parentLink = await downloadSpan.locator('xpath=ancestor::a').first();
-        if (parentLink) {
-          const href = await parentLink.getAttribute('href');
-          if (href && href.includes('rapidcdn')) {
-            rapidCdnUrl = href;
-            console.log(`✅ Found "Download video" link: ${rapidCdnUrl.substring(0, 80)}...`);
+      console.log('🔍 Method 1: Looking for Instagram-specific download link...');
+      const instagramSelectors = [
+        'a[href*="download-video-instagram"]',
+        'a[href*="instagram-reels-download"]',
+        'a:has-text("Download Video Instagram")',
+        'a:has-text("Instagram reels download")',
+        'a[href*="rapidcdn"][onclick*="instagram"]'
+      ];
+      
+      for (const selector of instagramSelectors) {
+        try {
+          const link = await page.locator(selector).first();
+          if (await link.isVisible({ timeout: 3000 })) {
+            const href = await link.getAttribute('href');
+            if (href) {
+              rapidCdnUrl = href.startsWith('http') ? href : `https://snapsave.app${href}`;
+              // Make sure it's not a Facebook link
+              if (rapidCdnUrl && !rapidCdnUrl.includes('facebook')) {
+                console.log(`✅ Found Instagram link: ${rapidCdnUrl.substring(0, 80)}...`);
+                break;
+              }
+            }
           }
-        }
+        } catch (e) {}
       }
     } catch (error) {
-      console.log('⚠️ Method 1 failed, trying next...');
+      console.log('⚠️ Instagram link search failed');
     }
 
-    // 🔥 METHOD 2: Find any link with rapidcdn
+    // ✅ METHOD 2: Click the Instagram button
     if (!rapidCdnUrl) {
       try {
-        console.log('🔍 Method 2: Looking for rapidcdn links...');
+        console.log('🔍 Method 2: Clicking Instagram download button...');
+        const instagramBtn = page.locator('a:has-text("Download Video Instagram")');
+        if (await instagramBtn.isVisible({ timeout: 3000 })) {
+          await instagramBtn.first().click();
+          console.log('🔄 Clicked Instagram button...');
+          await page.waitForTimeout(3000);
+          
+          const links = await page.$$eval('a[href*="rapidcdn"]', (elements) => 
+            elements.map(el => el.href)
+          );
+          // Find one that's NOT Facebook
+          const instagramLink = links.find(l => l && !l.includes('facebook'));
+          if (instagramLink) {
+            rapidCdnUrl = instagramLink;
+            console.log(`✅ Found rapidcdn after Instagram click`);
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Instagram button click failed');
+      }
+    }
+
+    // ✅ METHOD 3: RapidCDN links (exclude Facebook)
+    if (!rapidCdnUrl) {
+      try {
+        console.log('🔍 Method 3: Looking for rapidcdn links (excluding Facebook)...');
         const rapidLinks = await page.$$eval('a[href*="rapidcdn"]', (links) => 
-          links.map(link => link.href)
+          links
+            .filter(link => {
+              const text = link.textContent?.toLowerCase() || '';
+              const href = link.href || '';
+              return !href.includes('facebook') && 
+                     (text.includes('instagram') || text.includes('video') || text.includes('mp4'));
+            })
+            .map(link => link.href)
         );
         if (rapidLinks.length > 0) {
           rapidCdnUrl = rapidLinks[0];
-          console.log(`✅ Found rapidcdn link: ${rapidCdnUrl.substring(0, 80)}...`);
-          const ss7 = await captureScreenshot(page, '07_rapidcdn_found', 'RapidCDN link found');
-          if (ss7) screenshots.push(ss7);
+          console.log(`✅ Found valid rapidcdn link: ${rapidCdnUrl.substring(0, 80)}...`);
         }
       } catch (error) {}
     }
 
-    // 🔥 METHOD 3: Look for download button with video
+    // ✅ METHOD 4: .mp4 links (exclude Facebook)
     if (!rapidCdnUrl) {
       try {
-        console.log('🔍 Method 3: Looking for download buttons...');
-        const downloadBtns = await page.$$eval('a, button', (elements) => 
-          elements
-            .filter(el => {
-              const text = el.textContent?.toLowerCase() || '';
-              return text.includes('download') && (text.includes('video') || text.includes('mp4'));
+        console.log('🔍 Method 4: Looking for .mp4 links...');
+        const videoLinks = await page.$$eval('a[href*=".mp4"]', (links) => 
+          links
+            .filter(link => {
+              const href = link.href || '';
+              return !href.includes('facebook');
             })
-            .map(el => el.href || el.getAttribute('onclick'))
-            .filter(Boolean)
+            .map(link => link.href)
         );
-        if (downloadBtns.length > 0) {
-          const btn = downloadBtns[0];
-          if (btn.includes('rapidcdn')) {
-            rapidCdnUrl = btn;
-            console.log(`✅ Found download button with rapidcdn`);
-          } else {
-            const match = btn.match(/https?:\/\/[^"']+rapidcdn[^"']+/);
-            if (match) {
-              rapidCdnUrl = match[0];
-              console.log(`✅ Extracted rapidcdn from onclick`);
-            }
-          }
+        if (videoLinks.length > 0) {
+          rapidCdnUrl = videoLinks[0];
+          console.log(`✅ Found .mp4 link: ${rapidCdnUrl.substring(0, 80)}...`);
         }
       } catch (error) {}
     }
 
-    // 🔥 METHOD 4: Check all links on the page
+    // ✅ METHOD 5: Check all links (exclude Facebook)
     if (!rapidCdnUrl) {
       try {
-        console.log('🔍 Method 4: Checking all links...');
+        console.log('🔍 Method 5: Checking all links (excluding Facebook)...');
         const allLinks = await page.$$eval('a', (links) => 
           links
             .filter(link => {
               const href = link.href || '';
               const text = link.textContent?.toLowerCase() || '';
-              return href.includes('rapidcdn') || 
-                     (text.includes('download') && href.includes('http'));
+              return (href.includes('rapidcdn') || href.includes('.mp4')) && 
+                     !href.includes('facebook') &&
+                     !text.includes('facebook');
             })
             .map(link => link.href)
         );
         if (allLinks.length > 0) {
-          const bestLink = allLinks.find(l => l.includes('rapidcdn')) || allLinks[0];
-          rapidCdnUrl = bestLink;
-          console.log(`✅ Found link from all links`);
+          rapidCdnUrl = allLinks[0];
+          console.log(`✅ Found valid link from all links: ${rapidCdnUrl.substring(0, 80)}...`);
         }
       } catch (error) {}
     }
 
-    // If no link found, capture error state
     if (!rapidCdnUrl) {
       const ssError = await captureScreenshot(page, '99_no_link_found', 'No download link found');
       if (ssError) screenshots.push(ssError);
-      
-      try {
-        const allLinks = await page.$$eval('a', (links) => 
-          links.map(link => ({ text: link.textContent?.trim() || '', href: link.href || '' }))
-        );
-        console.log(`📌 Found ${allLinks.length} links on page`);
-        const downloadLinks = allLinks.filter(l => 
-          l.text.toLowerCase().includes('download') || 
-          l.href.includes('rapidcdn')
-        );
-        console.log(`📌 Download-related links:`, downloadLinks.slice(0, 5));
-      } catch (e) {}
-      
-      throw new Error('Could not find Instagram download URL');
+      throw new Error('Could not find Instagram video download URL');
     }
 
-    console.log('✅ Download URL found');
+    console.log(`✅ Instagram video URL found`);
     const ssSuccess = await captureScreenshot(page, '10_success', 'Download URL found');
     if (ssSuccess) screenshots.push(ssSuccess);
 
@@ -410,12 +429,10 @@ async function downloadViaSnapsave(instagramUrl) {
     try {
       console.log('📝 Looking for caption...');
       
-      // Try multiple selectors for caption
       const captionSelectors = [
         '.caption',
         '.description',
         '[class*="caption"]',
-        '[class*="desc"]',
         '.text-content',
         '.post-caption',
         'div[class*="caption"]',
@@ -427,7 +444,11 @@ async function downloadViaSnapsave(instagramUrl) {
           const captionEl = await page.locator(selector).first();
           if (await captionEl.isVisible({ timeout: 2000 })) {
             const text = await captionEl.textContent();
-            if (text && text.trim().length > 0) {
+            if (text && text.trim().length > 10 && 
+                !text.includes('Error') && 
+                !text.includes('facebook') &&
+                !text.includes('Download') &&
+                !text.includes('SnapSave')) {
               caption = text.trim();
               console.log(`✅ Caption found: ${caption.substring(0, 50)}...`);
               break;
@@ -436,30 +457,14 @@ async function downloadViaSnapsave(instagramUrl) {
         } catch (e) {}
       }
       
-      // If still no caption, try getting from page text
-      if (!caption) {
-        try {
-          const bodyText = await page.evaluate(() => document.body.innerText);
-          const lines = bodyText.split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 20);
-          
-          // Look for the caption (usually after the URL or in the main content)
-          for (const line of lines) {
-            if (!line.includes('http') && 
-                !line.includes('Download') && 
-                !line.includes('SnapSave') &&
-                !line.includes('Instagram') &&
-                line.length > 15) {
-              caption = line;
-              console.log(`✅ Extracted caption from page: ${caption.substring(0, 50)}...`);
-              break;
-            }
-          }
-        } catch (error) {}
+      // If no caption, skip
+      if (!caption || caption.includes('Error')) {
+        console.log('⚠️ No valid caption found, skipping');
+        caption = '';
       }
     } catch (error) {
       console.log(`⚠️ Could not capture caption: ${error.message}`);
+      caption = '';
     }
 
     // Download the video
