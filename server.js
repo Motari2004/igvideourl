@@ -35,6 +35,9 @@ if (!fs.existsSync(DEBUG_DIR)) {
   console.log('📸 Created debug screenshots directory');
 }
 
+// ============== VERCEL WEBHOOK URL ==============
+const VERCEL_WEBHOOK_URL = 'https://fetchgram-one.vercel.app/api/webhook/caption';
+
 // ============== CAPTURE SCREENSHOT ==============
 
 async function captureScreenshot(page, step, description) {
@@ -158,6 +161,55 @@ async function handleAds(page) {
   }
 }
 
+// ============== SEND TO VERCEL WEBHOOK ==============
+
+async function sendToVercel(instagramUrl, videoUrl, caption) {
+    try {
+        console.log(`📤 Sending to Vercel webhook...`);
+        console.log(`   URL: ${instagramUrl}`);
+        console.log(`   Video: ${videoUrl ? videoUrl.substring(0, 80) + '...' : 'None'}`);
+        console.log(`   Caption: ${caption ? caption.substring(0, 50) + '...' : 'None'}`);
+        
+        const payload = {
+            reel_url: instagramUrl,
+            video_url: videoUrl,
+            caption: caption || '',
+            status: 'completed',
+            timestamp: new Date().toISOString(),
+            source: 'snapsave_scraper'
+        };
+        
+        const response = await fetch(VERCEL_WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'IG-Reels-Scraper/1.0'
+            },
+            body: JSON.stringify(payload),
+            timeout: 30000
+        });
+        
+        let responseData = null;
+        try {
+            responseData = await response.json();
+            console.log(`📊 Vercel response:`, responseData);
+        } catch (e) {
+            console.log(`📊 Vercel response status: ${response.status}`);
+        }
+        
+        if (response.ok) {
+            console.log(`✅ Successfully sent to Vercel webhook`);
+            return true;
+        } else {
+            console.log(`⚠️ Vercel webhook returned ${response.status}`);
+            return false;
+        }
+    } catch (error) {
+        console.log(`⚠️ Failed to send to Vercel: ${error.message}`);
+        return false;
+    }
+}
+
 // ============== DOWNLOAD VIA SNAPSAVE ==============
 
 async function downloadViaSnapsave(instagramUrl) {
@@ -166,12 +218,13 @@ async function downloadViaSnapsave(instagramUrl) {
   let page = null;
   const startTime = Date.now();
   const screenshots = [];
+  let caption = '';
   
   try {
     const browserInstance = await initBrowser();
     page = await browserInstance.newPage();
     await page.setViewportSize({ width: 1366, height: 768 });
-    page.setDefaultTimeout(60000); // Increased timeout
+    page.setDefaultTimeout(60000);
 
     // Step 1: Navigate to snapsave
     console.log('🌐 Navigating to snapsave.app...');
@@ -179,7 +232,7 @@ async function downloadViaSnapsave(instagramUrl) {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
-    await page.waitForTimeout(3000); // Wait longer
+    await page.waitForTimeout(3000);
     const ss1 = await captureScreenshot(page, '01_initial_page', 'Snapsave initial page');
     if (ss1) screenshots.push(ss1);
 
@@ -218,7 +271,6 @@ async function downloadViaSnapsave(instagramUrl) {
     // ⏳ CRITICAL: Wait for the thumbnail to load
     console.log('⏳ Waiting for thumbnail to load...');
     try {
-      // Wait for the thumbnail image to appear (this is the key!)
       await page.waitForSelector('img[alt*="Download"], img[alt*="SnapX"], img[src*="rapidcdn"]', { 
         timeout: 30000 
       });
@@ -227,7 +279,6 @@ async function downloadViaSnapsave(instagramUrl) {
       console.log('⚠️ Thumbnail not found, continuing...');
     }
     
-    // Wait additional time for the download link to appear
     await page.waitForTimeout(3000);
     const ss4 = await captureScreenshot(page, '04_after_click_wait', 'After clicking download and waiting');
     if (ss4) screenshots.push(ss4);
@@ -251,7 +302,6 @@ async function downloadViaSnapsave(instagramUrl) {
       console.log('🔍 Method 1: Looking for "Download video" text...');
       const downloadSpan = await page.locator('span:has-text("Download video")').first();
       if (await downloadSpan.isVisible({ timeout: 5000 })) {
-        // Find the parent anchor tag
         const parentLink = await downloadSpan.locator('xpath=ancestor::a').first();
         if (parentLink) {
           const href = await parentLink.getAttribute('href');
@@ -300,7 +350,6 @@ async function downloadViaSnapsave(instagramUrl) {
             rapidCdnUrl = btn;
             console.log(`✅ Found download button with rapidcdn`);
           } else {
-            // Try to extract URL from onclick
             const match = btn.match(/https?:\/\/[^"']+rapidcdn[^"']+/);
             if (match) {
               rapidCdnUrl = match[0];
@@ -326,7 +375,6 @@ async function downloadViaSnapsave(instagramUrl) {
             .map(link => link.href)
         );
         if (allLinks.length > 0) {
-          // Find the one with rapidcdn or the longest URL
           const bestLink = allLinks.find(l => l.includes('rapidcdn')) || allLinks[0];
           rapidCdnUrl = bestLink;
           console.log(`✅ Found link from all links`);
@@ -339,7 +387,6 @@ async function downloadViaSnapsave(instagramUrl) {
       const ssError = await captureScreenshot(page, '99_no_link_found', 'No download link found');
       if (ssError) screenshots.push(ssError);
       
-      // Log all links for debugging
       try {
         const allLinks = await page.$$eval('a', (links) => 
           links.map(link => ({ text: link.textContent?.trim() || '', href: link.href || '' }))
@@ -358,6 +405,62 @@ async function downloadViaSnapsave(instagramUrl) {
     console.log('✅ Download URL found');
     const ssSuccess = await captureScreenshot(page, '10_success', 'Download URL found');
     if (ssSuccess) screenshots.push(ssSuccess);
+
+    // ========== CAPTURE CAPTION ==========
+    try {
+      console.log('📝 Looking for caption...');
+      
+      // Try multiple selectors for caption
+      const captionSelectors = [
+        '.caption',
+        '.description',
+        '[class*="caption"]',
+        '[class*="desc"]',
+        '.text-content',
+        '.post-caption',
+        'div[class*="caption"]',
+        'p[class*="desc"]'
+      ];
+      
+      for (const selector of captionSelectors) {
+        try {
+          const captionEl = await page.locator(selector).first();
+          if (await captionEl.isVisible({ timeout: 2000 })) {
+            const text = await captionEl.textContent();
+            if (text && text.trim().length > 0) {
+              caption = text.trim();
+              console.log(`✅ Caption found: ${caption.substring(0, 50)}...`);
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+      
+      // If still no caption, try getting from page text
+      if (!caption) {
+        try {
+          const bodyText = await page.evaluate(() => document.body.innerText);
+          const lines = bodyText.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 20);
+          
+          // Look for the caption (usually after the URL or in the main content)
+          for (const line of lines) {
+            if (!line.includes('http') && 
+                !line.includes('Download') && 
+                !line.includes('SnapSave') &&
+                !line.includes('Instagram') &&
+                line.length > 15) {
+              caption = line;
+              console.log(`✅ Extracted caption from page: ${caption.substring(0, 50)}...`);
+              break;
+            }
+          }
+        } catch (error) {}
+      }
+    } catch (error) {
+      console.log(`⚠️ Could not capture caption: ${error.message}`);
+    }
 
     // Download the video
     console.log(`📥 Downloading video...`);
@@ -388,7 +491,8 @@ async function downloadViaSnapsave(instagramUrl) {
       isDirectUrl: true,
       source: 'snapsave_app',
       localPath: filepath,
-      screenshots: screenshots
+      screenshots: screenshots,
+      caption: caption || ''
     };
 
   } catch (error) {
@@ -415,7 +519,25 @@ async function downloadViaSnapsave(instagramUrl) {
 
 async function downloadVideo(instagramUrl) {
   console.log(`\n📥 Processing: ${instagramUrl}`);
-  return await downloadViaSnapsave(instagramUrl);
+  
+  try {
+    const result = await downloadViaSnapsave(instagramUrl);
+    
+    if (result && result.success) {
+      console.log(`✅ Video downloaded successfully!`);
+      
+      // ✅ Send to Vercel webhook
+      await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
+      
+      return result;
+    }
+    
+    throw new Error('Download failed');
+    
+  } catch (error) {
+    console.error(`❌ Download error: ${error.message}`);
+    throw error;
+  }
 }
 
 // ============== SERVE DEBUG SCREENSHOTS ==============
@@ -450,7 +572,10 @@ app.post('/api/download', async (req, res) => {
     
     res.json({
       success: true,
-      data: result
+      data: {
+        ...result,
+        webhook_sent: true
+      }
     });
 
   } catch (error) {
@@ -517,6 +642,7 @@ app.listen(PORT, () => {
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📍 Local: http://localhost:${PORT}`);
   console.log(`📸 Debug Screenshots: ${DEBUG_DIR}`);
+  console.log(`📤 Vercel Webhook: ${VERCEL_WEBHOOK_URL}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
   console.log('═'.repeat(60) + '\n');
 });
