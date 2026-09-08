@@ -50,7 +50,6 @@ let browser = null;
 let browserInitPromise = null;
 let isBrowserReady = false;
 
-// ✅ Find Chrome path for Render
 function findChromePath() {
   // Render-specific paths
   const renderPaths = [
@@ -61,7 +60,6 @@ function findChromePath() {
     '/opt/render/.cache/ms-playwright/chromium-1200/chrome-linux/chrome'
   ];
   
-  // Local development paths
   const localPaths = [
     'C:\\Users\\PC\\AppData\\Local\\ms-playwright\\chromium-1234\\chrome-win\\chrome.exe',
     'C:\\Users\\PC\\AppData\\Local\\ms-playwright\\chromium-1200\\chrome-win\\chrome.exe',
@@ -71,7 +69,6 @@ function findChromePath() {
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
   ];
   
-  // Check if running on Render
   const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
   const paths = isRender ? renderPaths : localPaths;
   
@@ -88,7 +85,6 @@ function findChromePath() {
   return null;
 }
 
-// ✅ Check if running on Render
 const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
 
 async function initBrowser() {
@@ -102,7 +98,7 @@ async function initBrowser() {
       const executablePath = findChromePath();
 
       browser = await chromium.launch({
-        headless: isRender ? true : false, // Headless on Render, visible locally
+        headless: true, // Always headless on Render
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -116,12 +112,13 @@ async function initBrowser() {
           '--window-size=1366,768',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding'
+          '--disable-renderer-backgrounding',
+          '--disable-ipc-flooding-protection'
         ]
       });
 
       isBrowserReady = true;
-      console.log(`✅ Browser launched successfully (${isRender ? 'headless' : 'visible'} mode)`);
+      console.log('✅ Browser launched successfully (headless)');
       return browser;
     } catch (error) {
       console.error('❌ Failed to launch browser:', error.message);
@@ -143,7 +140,7 @@ async function handleAds(page) {
   }
 }
 
-// ============== SEND TO VERCEL ==============
+// ============== SEND TO VERCEL WEBHOOK ==============
 
 async function sendToVercel(instagramUrl, videoUrl, caption) {
     try {
@@ -155,7 +152,7 @@ async function sendToVercel(instagramUrl, videoUrl, caption) {
             caption: caption || '',
             status: 'completed',
             timestamp: new Date().toISOString(),
-            source: 'downloadmedia_scraper'
+            source: 'fitydown_scraper'
         };
         
         const response = await fetch(VERCEL_WEBHOOK_URL, {
@@ -181,10 +178,10 @@ async function sendToVercel(instagramUrl, videoUrl, caption) {
     }
 }
 
-// ============== DOWNLOAD VIA DOWNLOADMEDIA.APP ==============
+// ============== DOWNLOAD VIA INSTADL.FITYDOWN.COM ==============
 
-async function downloadViaDownloadmedia(instagramUrl) {
-  console.log('📥 Processing via downloadmedia.app...');
+async function downloadViaFitydown(instagramUrl) {
+  console.log('📥 Processing via instadl.fitydown.com...');
   
   let page = null;
   const startTime = Date.now();
@@ -201,51 +198,73 @@ async function downloadViaDownloadmedia(instagramUrl) {
     await page.setViewportSize({ width: 1366, height: 768 });
     page.setDefaultTimeout(60000);
 
-    // ✅ Enable request interception to capture the download URL
+    // Enable network interception
     await page.route('**/*', async (route) => {
       const url = route.request().url();
       
-      // Look for the download URL pattern
-      if (url.includes('admin-ajax.php?action=dm_download') || 
-          url.includes('dm_download') ||
-          url.includes('.mp4') ||
-          url.includes('fbcdn') ||
-          url.includes('cdninstagram') ||
-          url.includes('downloadmedia.app')) {
+      if (url.includes('fitydown.onrender.com/download_file/')) {
         downloadUrl = url;
-        console.log(`✅ Intercepted download URL: ${downloadUrl.substring(0, 60)}...`);
+        console.log(`✅ Intercepted FityDown URL: ${downloadUrl}`);
       }
       
-      // Continue the request
+      if (url.includes('.mp4') || url.includes('video')) {
+        if (!downloadUrl) {
+          downloadUrl = url;
+          console.log(`✅ Intercepted video URL: ${downloadUrl.substring(0, 60)}...`);
+        }
+      }
+      
       await route.continue();
     });
 
-    // 1. Navigate to downloadmedia.app
-    console.log('🌐 Navigating to downloadmedia.app...');
-    await page.goto('https://downloadmedia.app/', { 
+    // 1. Navigate
+    console.log('🌐 Navigating to instadl.fitydown.com...');
+    await page.goto('https://instadl.fitydown.com/', { 
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
     await page.waitForTimeout(2000);
 
-    // 2. Handle any ads
+    // 2. Handle ads
     await handleAds(page);
 
     // 3. Enter URL
     console.log('✏️ Entering URL...');
-    const urlInput = page.getByRole('textbox', { name: 'Enter Instagram URL' });
+    const urlInput = page.getByRole('textbox', { name: 'Instagram video URL' });
     await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
 
-    // 4. Click Download button - this will trigger the network request
+    // 4. Click Download
     console.log('🔄 Clicking Download button...');
-    const downloadBtn = page.getByRole('button', { name: 'Download' });
+    const downloadBtn = page.locator('#downloadBtn').getByText('Download');
     await downloadBtn.click();
-    console.log('✅ Download initiated, waiting for network request...');
+    console.log('✅ Download initiated');
 
-    // 5. Wait for the download URL to be intercepted
+    // 5. Wait for MP4 button
+    console.log('⏳ Waiting for MP4 download option...');
+    await page.waitForTimeout(3000);
+    
+    // 6. Click MP4
+    console.log('🔍 Looking for Download MP4 button...');
+    const mp4Btn = page.locator('#btn-mp4').getByText('Download MP4 (Video)');
+    
+    if (await mp4Btn.isVisible({ timeout: 10000 })) {
+      console.log('✅ Found MP4 button, clicking...');
+      await mp4Btn.click();
+      console.log('✅ MP4 download clicked!');
+    } else {
+      console.log('⚠️ MP4 button not found, trying alternative...');
+      const altBtn = page.locator('button:has-text("MP4"), a:has-text("Download MP4")').first();
+      if (await altBtn.isVisible({ timeout: 3000 })) {
+        await altBtn.click();
+        console.log('✅ Alternative MP4 button clicked!');
+      }
+    }
+
+    // 7. Wait for URL interception
+    console.log('⏳ Waiting for download URL to be intercepted...');
     let attempts = 0;
-    while (!downloadUrl && attempts < 45) {
+    while (!downloadUrl && attempts < 30) {
       await page.waitForTimeout(1000);
       attempts++;
       if (attempts % 5 === 0) {
@@ -253,89 +272,59 @@ async function downloadViaDownloadmedia(instagramUrl) {
       }
     }
 
-    // 6. If we still don't have the URL, try to find it on the page
+    // 8. Fallback: Check page content
     if (!downloadUrl) {
-      console.log('⚠️ URL not intercepted, trying to find on page...');
+      console.log('⚠️ URL not intercepted, checking page content...');
       
       try {
-        const links = await page.$$eval('a[href*="admin-ajax.php"], a[href*="dm_download"], a[href*=".mp4"]', (elements) => 
-          elements.map(el => el.href)
-        );
-        if (links.length > 0) {
-          downloadUrl = links[0];
-          console.log(`✅ Found download URL on page: ${downloadUrl.substring(0, 60)}...`);
-        }
-      } catch (error) {}
-    }
-
-    // 7. Check page content as last resort
-    if (!downloadUrl) {
-      try {
         const html = await page.content();
-        const matches = html.match(/https:\/\/[^"']*admin-ajax\.php\?action=dm_download[^"'\s]*/gi);
+        const matches = html.match(/https:\/\/fitydown\.onrender\.com\/download_file\/[a-f0-9]+/gi);
         if (matches && matches.length > 0) {
           downloadUrl = matches[0];
-          console.log(`✅ Found download URL in HTML: ${downloadUrl.substring(0, 60)}...`);
+          console.log(`✅ Found FityDown URL in HTML: ${downloadUrl.substring(0, 60)}...`);
         }
       } catch (error) {}
     }
 
     if (!downloadUrl) {
-      // Save screenshot for debugging
       try {
         await page.screenshot({ path: path.join(DEBUG_DIR, 'error_no_url.png'), fullPage: true });
         console.log('📸 Saved error screenshot: error_no_url.png');
       } catch (e) {}
-      throw new Error('Could not capture download URL');
+      throw new Error('Could not find download URL');
     }
 
-    console.log(`✅ Download URL captured: ${downloadUrl.substring(0, 60)}...`);
+    console.log(`✅ Download URL captured: ${downloadUrl}`);
 
-    // 8. Get caption
+    // 9. Get caption
     try {
       const captionEl = await page.locator('.caption, .description, [class*="caption"]').first();
       if (await captionEl.isVisible({ timeout: 2000 })) {
         const text = await captionEl.textContent();
         if (text && text.trim().length > 10 && 
             !text.includes('Error') && 
-            !text.includes('Download') &&
-            !text.includes('SnapSave')) {
+            !text.includes('Download')) {
           caption = text.trim();
           console.log(`✅ Caption found: ${caption.substring(0, 50)}...`);
         }
       }
     } catch (error) {}
 
-    // 9. Download video
-    console.log(`📥 Downloading video...`);
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const filename = `video_${Date.now()}.mp4`;
-    const filepath = path.join(DOWNLOAD_DIR, filename);
-    fs.writeFileSync(filepath, buffer);
-
-    const stats = fs.statSync(filepath);
-    const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-    const downloadTime = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    console.log(`✅ Video downloaded: ${filename} (${fileSizeMB} MB) in ${downloadTime}s`);
+    console.log('⏳ Waiting 5 seconds before closing...');
+    await page.waitForTimeout(5000);
 
     return {
       success: true,
-      filename: filename,
+      filename: `video_${Date.now()}.mp4`,
       downloadUrl: downloadUrl,
       directDownloadUrl: downloadUrl,
-      fileSize: `${fileSizeMB} MB`,
-      downloadTime: `${downloadTime}s`,
+      fileSize: 'Unknown',
+      downloadTime: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
       originalUrl: instagramUrl,
       isDirectUrl: true,
-      source: 'downloadmedia',
-      localPath: filepath,
-      caption: caption || ''
+      source: 'fitydown',
+      caption: caption || '',
+      videoUrl: downloadUrl
     };
 
   } catch (error) {
@@ -357,10 +346,10 @@ async function downloadVideo(instagramUrl) {
   console.log(`\n📥 Processing: ${instagramUrl}`);
   
   try {
-    const result = await downloadViaDownloadmedia(instagramUrl);
+    const result = await downloadViaFitydown(instagramUrl);
     
     if (result && result.success) {
-      console.log(`✅ Video downloaded successfully!`);
+      console.log(`✅ Video URL captured!`);
       await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
       return result;
     }
@@ -502,7 +491,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start server
 app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
-  console.log('🚀 Instagram Video Downloader (downloadmedia.app)');
+  console.log('🚀 Instagram Video Downloader (instadl.fitydown.com)');
   console.log('═'.repeat(60));
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📡 Mode: ${isRender ? 'Render (headless)' : 'Local (visible)'}`);
