@@ -267,7 +267,7 @@ async function downloadVideo(instagramUrl) {
     console.log('🔄 Clicking download button...');
     const downloadBtn = page.getByRole('button', { name: 'Download' });
     await downloadBtn.click();
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(6000);
 
     // Handle ads after click
     await handleAds(page);
