@@ -209,7 +209,7 @@ async function downloadViaSnapsave(instagramUrl) {
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
-      timeout: 15000 // ✅ Reduced from 30s to 15s
+      timeout: 20000 // ✅ Reduced from 30s to 15s
     });
     await page.waitForTimeout(1000); // ✅ Reduced from 3000ms to 1000ms
 
