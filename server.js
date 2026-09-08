@@ -234,17 +234,9 @@ async function handleAds(page) {
 }
 
 // Download video function
-// Download video function with screenshot debugging
 async function downloadVideo(instagramUrl) {
   let page = null;
   const startTime = Date.now();
-  const debugDir = path.join(__dirname, 'debug_screenshots');
-  
-  // Ensure debug directory exists
-  if (!fs.existsSync(debugDir)) {
-    fs.mkdirSync(debugDir, { recursive: true });
-    console.log('📁 Created debug screenshots directory');
-  }
   
   try {
     console.log(`📥 Processing: ${instagramUrl}`);
@@ -254,104 +246,34 @@ async function downloadVideo(instagramUrl) {
     await page.setViewportSize({ width: 1366, height: 768 });
     page.setDefaultTimeout(30000);
 
-    // Generate unique filename for this request
-    const timestamp = Date.now();
-    const urlHash = Buffer.from(instagramUrl).toString('base64').substring(0, 16);
-    const screenshotBase = `${timestamp}_${urlHash}`;
-    
-    // Take screenshot after each step
-    async function takeScreenshot(step, description) {
-      try {
-        const filename = `${screenshotBase}_${step}.png`;
-        const filepath = path.join(debugDir, filename);
-        await page.screenshot({ 
-          path: filepath,
-          fullPage: true,
-          type: 'png'
-        });
-        console.log(`📸 Screenshot saved: ${filename} (${description})`);
-        return filepath;
-      } catch (e) {
-        console.log(`⚠️ Could not take screenshot at step ${step}: ${e.message}`);
-        return null;
-      }
-    }
-
     // Navigate to snapsave.app
     console.log('🌐 Navigating to snapsave.app...');
     await page.goto('https://snapsave.app/', { 
       waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      timeout: 30000
     });
     await page.waitForTimeout(2000);
-    await takeScreenshot('01_initial_page', 'Initial snapsave.app page');
 
     // Handle initial ads
     await handleAds(page);
-    await takeScreenshot('02_after_ads', 'After handling ads');
 
     // Enter URL
     console.log('✏️ Entering URL...');
     const urlInput = page.getByRole('textbox', { name: 'Url' });
     await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
-    await takeScreenshot('03_url_filled', 'URL filled in input');
 
     // Click download button
     console.log('🔄 Clicking download button...');
     const downloadBtn = page.getByRole('button', { name: 'Download' });
     await downloadBtn.click();
     await page.waitForTimeout(3000);
-    await takeScreenshot('04_after_click', 'After clicking download button');
 
     // Handle ads after click
     await handleAds(page);
-    await takeScreenshot('05_after_ads_2', 'After handling second set of ads');
 
     // Wait for download link
     console.log('⏳ Waiting for download link...');
-    
-    // Take a screenshot to see the current state
-    await takeScreenshot('06_waiting_for_link', 'Waiting for download link');
-
-    // Log all links on the page for debugging
-    try {
-      const allLinks = await page.$$eval('a', (links) => 
-        links.map(link => ({
-          text: link.textContent?.trim() || '',
-          href: link.href,
-          onclick: link.onclick?.toString() || '',
-          className: link.className || '',
-          id: link.id || ''
-        }))
-      );
-      console.log(`🔗 Found ${allLinks.length} links on page`);
-      
-      // Log links that might be relevant
-      const downloadLinks = allLinks.filter(l => 
-        l.text?.toLowerCase().includes('download') ||
-        l.href?.includes('rapidcdn') ||
-        l.onclick?.includes('rapidcdn')
-      );
-      
-      if (downloadLinks.length > 0) {
-        console.log(`📌 Found ${downloadLinks.length} potential download links:`);
-        downloadLinks.forEach((link, i) => {
-          console.log(`  ${i+1}. Text: "${link.text}", Href: ${link.href?.substring(0, 80)}...`);
-        });
-      } else {
-        console.log('⚠️ No download links found in page');
-        // Save full page HTML for debugging
-        try {
-          const html = await page.content();
-          const htmlPath = path.join(debugDir, `${screenshotBase}_page.html`);
-          fs.writeFileSync(htmlPath, html);
-          console.log(`📄 HTML saved: ${htmlPath}`);
-        } catch (e) {}
-      }
-    } catch (e) {
-      console.log(`⚠️ Could not analyze links: ${e.message}`);
-    }
     
     const downloadLinkSelectors = [
       'a[onclick*="showAd"][href*="rapidcdn"]',
@@ -375,129 +297,68 @@ async function downloadVideo(instagramUrl) {
           usedSelector = selector;
           console.log(`✅ Found download link using selector: ${selector}`);
           
-          // Take screenshot when link is found
-          await takeScreenshot('07_link_found', `Found link with selector: ${selector}`);
-          
           // Get the href which contains the rapidcdn URL
           const href = await downloadLink.getAttribute('href');
-          console.log(`📎 Href: ${href?.substring(0, 100)}...`);
           if (href && href.includes('rapidcdn')) {
             rapidCdnUrl = href;
             console.log('✅ Found rapidcdn URL in href');
-            await takeScreenshot('08_rapidcdn_found', 'RapidCDN URL found');
             break;
           }
         }
-      } catch (e) {}
+      } catch {}
     }
 
     // If we didn't find it with the selectors, try a more generic approach
     if (!downloadLink) {
-      console.log('🔍 Trying generic link search...');
       try {
-        const allLinks = await page.$$eval('a', (links) => 
-          links.map(link => ({
-            element: link,
-            href: link.href,
-            text: link.textContent?.trim() || '',
-            onclick: link.getAttribute('onclick') || ''
-          }))
-        );
-        
-        for (const linkData of allLinks) {
-          if (linkData.href && linkData.href.includes('rapidcdn')) {
-            rapidCdnUrl = linkData.href;
+        const allLinks = await page.locator('a').all();
+        for (const link of allLinks) {
+          const href = await link.getAttribute('href');
+          if (href && href.includes('rapidcdn')) {
+            downloadLink = link;
+            rapidCdnUrl = href;
             usedSelector = 'generic link search';
             console.log('✅ Found rapidcdn URL via generic search');
-            await takeScreenshot('09_generic_found', 'Found via generic search');
             break;
           }
-          if (linkData.onclick && linkData.onclick.includes('rapidcdn')) {
-            const match = linkData.onclick.match(/https?:\/\/[^"']+/);
-            if (match) {
-              rapidCdnUrl = match[0];
-              usedSelector = 'onclick attribute';
-              console.log('✅ Found rapidcdn URL in onclick attribute');
-              await takeScreenshot('10_onclick_found', 'Found via onclick');
-              break;
-            }
-          }
         }
-      } catch (e) {}
+      } catch {}
     }
 
     // If still no link, try to get URL from onclick attribute
     if (!rapidCdnUrl && downloadLink) {
       try {
         const onclickAttr = await downloadLink.getAttribute('onclick');
-        console.log(`📎 Onclick: ${onclickAttr?.substring(0, 100)}...`);
         if (onclickAttr) {
           const urlMatch = onclickAttr.match(/https?:\/\/[^"']+/);
           if (urlMatch) {
             rapidCdnUrl = urlMatch[0];
             console.log('✅ Found rapidcdn URL in onclick attribute');
-            await takeScreenshot('11_onclick_match', 'Found via onclick match');
           }
         }
-      } catch (e) {}
+      } catch {}
     }
 
     // If still no URL, try to find any link with rapidcdn in the page
     if (!rapidCdnUrl) {
-      console.log('🔍 Searching for rapidcdn in page content...');
       try {
-        const rapidLinks = await page.$$eval('a[href*="rapidcdn"]', (links) => 
-          links.map(link => link.href)
-        );
-        if (rapidLinks.length > 0) {
-          rapidCdnUrl = rapidLinks[0];
-          console.log('✅ Found rapidcdn URL via direct link search');
-          await takeScreenshot('12_direct_rapidcdn', 'Found via direct rapidcdn search');
-        }
-      } catch (e) {}
-    }
-
-    // If still no URL, check if the page has any download link
-    if (!rapidCdnUrl) {
-      console.log('🔍 Checking for any download link...');
-      try {
-        const downloadLinks = await page.$$eval('a', (links) => 
-          links
-            .filter(link => {
-              const text = link.textContent?.toLowerCase() || '';
-              return text.includes('download') || text.includes('mp4') || text.includes('video');
-            })
-            .map(link => ({
-              href: link.href,
-              text: link.textContent?.trim() || ''
-            }))
-        );
-        
-        if (downloadLinks.length > 0) {
-          console.log(`📌 Found ${downloadLinks.length} download-related links:`);
-          downloadLinks.forEach((link, i) => {
-            console.log(`  ${i+1}. "${link.text}" -> ${link.href?.substring(0, 60)}...`);
-          });
-          // Use the first one
-          if (downloadLinks[0].href) {
-            rapidCdnUrl = downloadLinks[0].href;
-            console.log('✅ Using first download link');
-            await takeScreenshot('13_download_link_used', 'Using first download link');
+        const rapidLinks = await page.locator('a[href*="rapidcdn"]').all();
+        for (const link of rapidLinks) {
+          const href = await link.getAttribute('href');
+          if (href && href.includes('rapidcdn')) {
+            rapidCdnUrl = href;
+            console.log('✅ Found rapidcdn URL via direct link search');
+            break;
           }
         }
-      } catch (e) {}
+      } catch {}
     }
 
     if (!rapidCdnUrl) {
-      // Take final screenshot before error
-      await takeScreenshot('99_failure', 'FAILED - No rapidcdn URL found');
       throw new Error('Could not find rapidcdn download URL');
     }
 
     console.log('✅ RapidCDN URL found');
-    console.log(`📎 URL: ${rapidCdnUrl.substring(0, 100)}...`);
-    
-    await takeScreenshot('14_success', 'SUCCESS - RapidCDN URL found');
 
     // Get suggested filename from the URL
     let filename = 'video.mp4';
@@ -506,7 +367,7 @@ async function downloadVideo(instagramUrl) {
       if (filenameMatch) {
         filename = decodeURIComponent(filenameMatch[1]);
       }
-    } catch (e) {}
+    } catch {}
 
     // Clean filename
     filename = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -534,30 +395,21 @@ async function downloadVideo(instagramUrl) {
 
     console.log(`✅ Video downloaded: ${filename} (${fileSizeMB.toFixed(2)} MB) in ${downloadTime}s`);
 
+    // Return the rapidcdn URL directly
     return {
       success: true,
       filename: filename,
-      downloadUrl: rapidCdnUrl,
+      downloadUrl: rapidCdnUrl,  // This is the rapidcdn URL
       directDownloadUrl: rapidCdnUrl,
       fileSize: `${fileSizeMB.toFixed(2)} MB`,
       downloadTime: `${downloadTime}s`,
       originalUrl: instagramUrl,
       isDirectUrl: true,
-      localPath: filepath,
-      screenshot: `${screenshotBase}_14_success.png`
+      localPath: filepath
     };
 
   } catch (error) {
     console.error('❌ Download error:', error.message);
-    // Take error screenshot
-    if (page) {
-      try {
-        const timestamp = Date.now();
-        const errorPath = path.join(__dirname, 'debug_screenshots', `ERROR_${timestamp}.png`);
-        await page.screenshot({ path: errorPath, fullPage: true });
-        console.log(`📸 Error screenshot saved: ${errorPath}`);
-      } catch (e) {}
-    }
     throw error;
   } finally {
     if (page) {
