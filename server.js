@@ -7,10 +7,8 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy - Required for rate limiting behind proxies (like Render)
 app.set('trust proxy', 1);
 
-// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -19,33 +17,25 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/', limiter);
-
-// Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Ensure downloads directory exists
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
 if (!fs.existsSync(DOWNLOAD_DIR)) {
   fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   console.log('📁 Created downloads directory');
 }
 
-// ============== DEBUG SCREENSHOTS DIRECTORY ==============
 const DEBUG_DIR = path.join(__dirname, 'debug_screenshots');
 if (!fs.existsSync(DEBUG_DIR)) {
   fs.mkdirSync(DEBUG_DIR, { recursive: true });
   console.log('📸 Created debug screenshots directory');
 }
 
-// ============== VIDEO URL GETTER SERVICE ==============
-const VIDEO_SERVICE_URL = 'https://igvideourl.onrender.com/api/download';
-
-// ============== CAPTURE SCREENSHOT FUNCTION ==============
+// ============== CAPTURE SCREENSHOT ==============
 
 async function captureScreenshot(page, step, description) {
   try {
@@ -67,80 +57,12 @@ async function captureScreenshot(page, step, description) {
       timestamp: timestamp
     };
   } catch (e) {
-    console.log(`⚠️ Could not take screenshot at step ${step}: ${e.message}`);
+    console.log(`⚠️ Could not take screenshot: ${e.message}`);
     return null;
   }
 }
 
-// ============== PRIMARY: DOWNLOAD VIA VIDEO URL SERVICE ==============
-
-async function downloadViaVideoService(instagramUrl) {
-  console.log('🔄 Using Instagram video URL getter service...');
-  
-  try {
-    const response = await fetch(VIDEO_SERVICE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: instagramUrl }),
-      signal: AbortSignal.timeout(30000)
-    });
-    
-    if (!response.ok) {
-      console.log(`⚠️ Service returned ${response.status}`);
-      return null;
-    }
-    
-    const data = await response.json();
-    console.log('📊 Service response received');
-    
-    if (data.success && data.data) {
-      const videoData = data.data;
-      const downloadUrl = videoData.downloadUrl || videoData.directDownloadUrl;
-      
-      if (downloadUrl && (downloadUrl.includes('.mp4') || downloadUrl.includes('video'))) {
-        console.log(`✅ Got video URL from service: ${downloadUrl.substring(0, 80)}...`);
-        
-        const filename = videoData.filename || `video_${Date.now()}.mp4`;
-        
-        console.log(`📥 Downloading video...`);
-        const videoResponse = await fetch(downloadUrl);
-        if (!videoResponse.ok) {
-          throw new Error(`HTTP ${videoResponse.status}: ${videoResponse.statusText}`);
-        }
-        
-        const buffer = Buffer.from(await videoResponse.arrayBuffer());
-        const filepath = path.join(DOWNLOAD_DIR, filename);
-        fs.writeFileSync(filepath, buffer);
-        
-        const stats = fs.statSync(filepath);
-        const actualSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-        
-        console.log(`✅ Video downloaded: ${filename} (${actualSizeMB} MB)`);
-        
-        return {
-          success: true,
-          filename: filename,
-          downloadUrl: downloadUrl,
-          directDownloadUrl: downloadUrl,
-          fileSize: `${actualSizeMB} MB`,
-          originalUrl: instagramUrl,
-          isDirectUrl: true,
-          source: 'igvideourl_service',
-          localPath: filepath,
-          screenshots: []
-        };
-      }
-    }
-    
-    console.log('⚠️ Service did not return a valid video URL');
-    return null;
-  } catch (error) {
-    console.log(`⚠️ Service error: ${error.message}`);
-    return null;
-  }
-}
-
-// ============== SECONDARY: DOWNLOAD VIA SNAPSAVE (FALLBACK) ==============
+// ============== BROWSER SETUP ==============
 
 const { chromium } = require('playwright');
 
@@ -149,27 +71,20 @@ let browserInitPromise = null;
 let isBrowserReady = false;
 
 async function initBrowser() {
-  if (browser && isBrowserReady) {
-    return browser;
-  }
-  
-  if (browserInitPromise) {
-    return browserInitPromise;
-  }
+  if (browser && isBrowserReady) return browser;
+  if (browserInitPromise) return browserInitPromise;
 
   browserInitPromise = (async () => {
     try {
       console.log('🚀 Launching browser...');
       
       let executablePath = null;
-      
       if (process.env.RENDER) {
         const renderPaths = [
           '/usr/bin/google-chrome',
           '/usr/bin/chromium',
           '/usr/bin/chromium-browser'
         ];
-        
         for (const path of renderPaths) {
           if (fs.existsSync(path)) {
             executablePath = path;
@@ -177,7 +92,6 @@ async function initBrowser() {
             break;
           }
         }
-        
         if (!executablePath) {
           console.log('⚠️ No Chrome found on Render, using Playwright default');
         }
@@ -244,8 +158,10 @@ async function handleAds(page) {
   }
 }
 
+// ============== DOWNLOAD VIA SNAPSAVE ==============
+
 async function downloadViaSnapsave(instagramUrl) {
-  console.log('🔄 Trying snapsave.app as fallback...');
+  console.log('📥 Processing via snapsave.app...');
   
   let page = null;
   const startTime = Date.now();
@@ -349,7 +265,23 @@ async function downloadViaSnapsave(instagramUrl) {
       } catch (error) {}
     }
 
-    // If no link found, capture the final state
+    // Try clicking the Instagram-specific button
+    if (!rapidCdnUrl) {
+      try {
+        const instagramBtn = page.locator('a:has-text("Download Video Instagram")');
+        if (await instagramBtn.isVisible({ timeout: 2000 })) {
+          const href = await instagramBtn.getAttribute('href');
+          if (href) {
+            rapidCdnUrl = href.startsWith('http') ? href : `https://snapsave.app${href}`;
+            console.log(`✅ Found Instagram button link: ${rapidCdnUrl?.substring(0, 80)}...`);
+            const ss9 = await captureScreenshot(page, '09_instagram_button', 'Instagram button found');
+            if (ss9) screenshots.push(ss9);
+          }
+        }
+      } catch (error) {}
+    }
+
+    // If no link found, capture error state
     if (!rapidCdnUrl) {
       const ssError = await captureScreenshot(page, '99_no_link_found', 'No download link found');
       if (ssError) screenshots.push(ssError);
@@ -393,7 +325,6 @@ async function downloadViaSnapsave(instagramUrl) {
     };
 
   } catch (error) {
-    // Capture error screenshot
     if (page) {
       try {
         const ssError = await captureScreenshot(page, 'error_state', 'Error state');
@@ -401,7 +332,6 @@ async function downloadViaSnapsave(instagramUrl) {
       } catch (e) {}
     }
     
-    // Include screenshots in the error
     const err = new Error(error.message);
     err.screenshots = screenshots;
     throw err;
@@ -418,39 +348,7 @@ async function downloadViaSnapsave(instagramUrl) {
 
 async function downloadVideo(instagramUrl) {
   console.log(`\n📥 Processing: ${instagramUrl}`);
-  
-  // ✅ METHOD 1: Use your existing video service (PRIMARY)
-  console.log('\n🔄 Method 1: Using video URL getter service...');
-  try {
-    const result = await downloadViaVideoService(instagramUrl);
-    if (result && result.success) {
-      console.log('✅ Successfully downloaded via video service!');
-      return result;
-    }
-    console.log('⚠️ Video service failed, trying fallback...');
-  } catch (error) {
-    console.log(`⚠️ Video service error: ${error.message}`);
-  }
-  
-  // ✅ METHOD 2: Fallback to snapsave (SECONDARY)
-  console.log('\n🔄 Method 2: Trying snapsave fallback...');
-  try {
-    const result = await downloadViaSnapsave(instagramUrl);
-    if (result && result.success) {
-      console.log('✅ Successfully downloaded via snapsave!');
-      return result;
-    }
-  } catch (error) {
-    console.log(`⚠️ Snapsave error: ${error.message}`);
-    // Return the error with screenshots
-    if (error.screenshots && error.screenshots.length > 0) {
-      throw error;
-    }
-  }
-  
-  // ❌ All methods failed
-  console.log('\n❌ All download methods failed');
-  throw new Error('Could not download video from any source');
+  return await downloadViaSnapsave(instagramUrl);
 }
 
 // ============== SERVE DEBUG SCREENSHOTS ==============
@@ -485,16 +383,12 @@ app.post('/api/download', async (req, res) => {
     
     res.json({
       success: true,
-      data: {
-        ...result,
-        screenshots: result.screenshots || []
-      }
+      data: result
     });
 
   } catch (error) {
     console.error('❌ API Error:', error.message);
     
-    // Include screenshots in error response
     const response = {
       success: false,
       error: error.message || 'Failed to download video. Please try again.'
@@ -514,15 +408,10 @@ app.use('/downloads', express.static(DOWNLOAD_DIR));
 
 // Serve frontend
 app.get('/', (req, res) => {
-  const indexPath = path.join(__dirname, 'public', 'index.html');
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.sendFile(path.join(__dirname, 'index.html'));
-  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Health check endpoint
+// Health check
 app.get('/health', async (req, res) => {
   res.json({
     status: 'ok',
@@ -556,11 +445,10 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
-  console.log('🚀 Instagram Video Downloader Server');
+  console.log('🚀 Instagram Video Downloader (Snapsave)');
   console.log('═'.repeat(60));
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📍 Local: http://localhost:${PORT}`);
-  console.log(`📤 Video Service: ${VIDEO_SERVICE_URL}`);
   console.log(`📸 Debug Screenshots: ${DEBUG_DIR}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
   console.log('═'.repeat(60) + '\n');
@@ -568,30 +456,24 @@ app.listen(PORT, () => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT. Shutting down gracefully...');
+  console.log('\n🛑 Shutting down...');
   if (browser) {
     try {
       await browser.close();
       console.log('🔒 Browser closed');
-    } catch (e) {
-      console.error('Error closing browser:', e.message);
-    }
+    } catch (e) {}
   }
-  console.log('👋 Goodbye!');
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n🛑 Received SIGTERM. Shutting down gracefully...');
+  console.log('\n🛑 Shutting down...');
   if (browser) {
     try {
       await browser.close();
       console.log('🔒 Browser closed');
-    } catch (e) {
-      console.error('Error closing browser:', e.message);
-    }
+    } catch (e) {}
   }
-  console.log('👋 Goodbye!');
   process.exit(0);
 });
 

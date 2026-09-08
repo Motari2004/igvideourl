@@ -5,491 +5,70 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Instagram Video Downloader</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        
-        .container {
-            width: 100%;
-            max-width: 750px;
-        }
-        
-        .card {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        }
-        
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 28px;
-        }
-        
-        .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 16px;
-        }
-        
-        .input-group {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        
-        input {
-            flex: 1;
-            padding: 14px 18px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 16px;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-        
-        input:focus {
-            border-color: #667eea;
-        }
-        
-        button {
-            padding: 14px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            white-space: nowrap;
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-        }
-        
-        button:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .error {
-            background: #fee;
-            color: #c33;
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border-left: 4px solid #c33;
-            display: none;
-        }
-        
-        .error .error-details {
-            font-size: 13px;
-            color: #888;
-            margin-top: 6px;
-        }
-        
-        .result {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 24px;
-            margin-top: 20px;
-            border: 2px solid #e9ecef;
-            display: none;
-        }
-        
-        .result.success {
-            border-color: #28a745;
-        }
-        
-        .result.error-result {
-            border-color: #dc3545;
-        }
-        
-        .result h3 {
-            color: #28a745;
-            margin-bottom: 15px;
-        }
-        
-        .result.error-result h3 {
-            color: #dc3545;
-        }
-        
-        .result .info {
-            background: white;
-            border-radius: 8px;
-            padding: 16px;
-            margin: 10px 0 20px 0;
-        }
-        
-        .result .info div {
-            padding: 8px 0;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .result .info div:last-child {
-            border-bottom: none;
-        }
-        
-        .result .label {
-            color: #666;
-            font-weight: 500;
-        }
-        
-        .result .value {
-            color: #333;
-            float: right;
-            max-width: 60%;
-            word-break: break-all;
-        }
-        
-        .result .value.url-value {
-            color: #667eea;
-            font-size: 12px;
-            cursor: pointer;
-            max-width: 70%;
-        }
-        
-        .result .value.url-value:hover {
-            text-decoration: underline;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .button-group .btn {
-            flex: 1;
-            padding: 14px;
-            border: none;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-align: center;
-            text-decoration: none;
-        }
-        
-        .btn-download {
-            background: #28a745;
-            color: white;
-        }
-        
-        .btn-download:hover {
-            background: #218838;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(40, 167, 69, 0.3);
-        }
-        
-        .btn-copy {
-            background: #667eea;
-            color: white;
-        }
-        
-        .btn-copy:hover {
-            background: #5a67d8;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
-        }
-        
-        .btn-copy.copied {
-            background: #28a745;
-        }
-        
-        .btn-reset {
-            background: #6c757d;
-            color: white;
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-top: 10px;
-        }
-        
-        .btn-reset:hover {
-            background: #5a6268;
-        }
-        
-        .url-box {
-            background: #f0f0f0;
-            border-radius: 6px;
-            padding: 10px 12px;
-            margin: 10px 0;
-            font-size: 11px;
-            word-break: break-all;
-            color: #555;
-            border: 1px solid #ddd;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            max-height: 80px;
-            overflow-y: auto;
-        }
-        
-        .url-box .url-text {
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            word-break: break-all;
-            font-size: 11px;
-        }
-        
-        .url-box .copy-small {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 4px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        
-        .url-box .copy-small:hover {
-            background: #5a67d8;
-        }
-        
-        /* Screenshots Section */
-        .screenshots-section {
-            margin-top: 20px;
-            border-top: 2px solid #eee;
-            padding-top: 20px;
-        }
-        
-        .screenshots-section h4 {
-            color: #555;
-            margin-bottom: 12px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .screenshots-section h4 .count {
-            background: #667eea;
-            color: white;
-            border-radius: 50%;
-            padding: 0 8px;
-            font-size: 11px;
-            line-height: 20px;
-        }
-        
-        .screenshots-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 10px;
-        }
-        
-        .screenshot-item {
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            overflow: hidden;
-            transition: border-color 0.3s, transform 0.2s;
-            cursor: pointer;
-            background: #fff;
-        }
-        
-        .screenshot-item:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .screenshot-item img {
-            width: 100%;
-            height: 140px;
-            object-fit: cover;
-            display: block;
-        }
-        
-        .screenshot-item .caption {
-            padding: 6px 10px;
-            font-size: 10px;
-            color: #666;
-            background: #f8f9fa;
-            text-align: center;
-            border-top: 1px solid #eee;
-            font-weight: 500;
-        }
-        
-        .screenshot-item .step-badge {
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            font-size: 9px;
-            padding: 1px 8px;
-            border-radius: 10px;
-            margin-right: 4px;
-        }
-        
-        /* Screenshot Modal */
-        .screenshot-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.92);
-            z-index: 2000;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .screenshot-modal.active {
-            display: flex;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        .screenshot-modal img {
-            max-width: 90%;
-            max-height: 85%;
-            border-radius: 8px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-        }
-        
-        .screenshot-modal .close-btn {
-            position: absolute;
-            top: 20px;
-            right: 30px;
-            color: white;
-            font-size: 40px;
-            cursor: pointer;
-            background: none;
-            border: none;
-            transition: transform 0.2s;
-        }
-        
-        .screenshot-modal .close-btn:hover {
-            transform: scale(1.2);
-        }
-        
-        .screenshot-modal .screenshot-info {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #ccc;
-            background: rgba(0,0,0,0.6);
-            padding: 8px 20px;
-            border-radius: 20px;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .features {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .feature {
-            text-align: center;
-            padding: 12px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            font-size: 14px;
-            color: #555;
-        }
-        
-        .feature span {
-            display: block;
-            font-size: 24px;
-            margin-bottom: 5px;
-        }
-        
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #333;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-            z-index: 1000;
-            max-width: 90%;
-        }
-        
-        .toast.show {
-            opacity: 1;
-        }
-        
-        .badge {
-            display: inline-block;
-            background: #28a745;
-            color: white;
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            margin-left: 5px;
-        }
-        
-        .loading-spinner {
-            display: inline-block;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Source badge */
-        .source-badge {
-            display: inline-block;
-            padding: 2px 12px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-        
-        .source-badge.service {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .source-badge.snapsave {
-            background: #fff3cd;
-            color: #856404;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        .container { width: 100%; max-width: 750px; }
+        .card { background: white; border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        h1 { text-align: center; color: #333; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 16px; }
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 14px 18px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 16px; outline: none; transition: border-color 0.3s; }
+        input:focus { border-color: #667eea; }
+        button { padding: 14px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.3s; white-space: nowrap; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4); }
+        button:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+        .error { background: #fee; color: #c33; padding: 12px 16px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #c33; display: none; }
+        .error .error-details { font-size: 13px; color: #888; margin-top: 6px; }
+        .result { background: #f8f9fa; border-radius: 12px; padding: 24px; margin-top: 20px; border: 2px solid #e9ecef; display: none; }
+        .result.success { border-color: #28a745; }
+        .result.error-result { border-color: #dc3545; }
+        .result h3 { color: #28a745; margin-bottom: 15px; }
+        .result.error-result h3 { color: #dc3545; }
+        .result .info { background: white; border-radius: 8px; padding: 16px; margin: 10px 0 20px 0; }
+        .result .info div { padding: 8px 0; border-bottom: 1px solid #eee; }
+        .result .info div:last-child { border-bottom: none; }
+        .result .label { color: #666; font-weight: 500; }
+        .result .value { color: #333; float: right; max-width: 60%; word-break: break-all; }
+        .button-group { display: flex; gap: 10px; margin-top: 10px; }
+        .button-group .btn { flex: 1; padding: 14px; border: none; border-radius: 10px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; text-align: center; text-decoration: none; }
+        .btn-download { background: #28a745; color: white; }
+        .btn-download:hover { background: #218838; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(40, 167, 69, 0.3); }
+        .btn-copy { background: #667eea; color: white; }
+        .btn-copy:hover { background: #5a67d8; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
+        .btn-copy.copied { background: #28a745; }
+        .btn-reset { background: #6c757d; color: white; width: 100%; padding: 14px; border: none; border-radius: 10px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; margin-top: 10px; }
+        .btn-reset:hover { background: #5a6268; }
+        .url-box { background: #f0f0f0; border-radius: 6px; padding: 10px 12px; margin: 10px 0; font-size: 11px; word-break: break-all; color: #555; border: 1px solid #ddd; display: flex; align-items: center; gap: 10px; max-height: 80px; overflow-y: auto; }
+        .url-box .url-text { flex: 1; overflow: hidden; text-overflow: ellipsis; word-break: break-all; font-size: 11px; }
+        .url-box .copy-small { background: #667eea; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+        .url-box .copy-small:hover { background: #5a67d8; }
+        
+        /* Screenshots */
+        .screenshots-section { margin-top: 20px; border-top: 2px solid #eee; padding-top: 20px; }
+        .screenshots-section h4 { color: #555; margin-bottom: 12px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+        .screenshots-section h4 .count { background: #667eea; color: white; border-radius: 50%; padding: 0 8px; font-size: 11px; line-height: 20px; }
+        .screenshots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+        .screenshot-item { border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; transition: border-color 0.3s; cursor: pointer; background: #fff; }
+        .screenshot-item:hover { border-color: #667eea; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .screenshot-item img { width: 100%; height: 140px; object-fit: cover; display: block; }
+        .screenshot-item .caption { padding: 6px 10px; font-size: 10px; color: #666; background: #f8f9fa; text-align: center; border-top: 1px solid #eee; font-weight: 500; }
+        .screenshot-item .step-badge { display: inline-block; background: #667eea; color: white; font-size: 9px; padding: 1px 8px; border-radius: 10px; margin-right: 4px; }
+        
+        /* Modal */
+        .screenshot-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.92); z-index: 2000; justify-content: center; align-items: center; padding: 20px; animation: fadeIn 0.3s ease; }
+        .screenshot-modal.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .screenshot-modal img { max-width: 90%; max-height: 85%; border-radius: 8px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .screenshot-modal .close-btn { position: absolute; top: 20px; right: 30px; color: white; font-size: 40px; cursor: pointer; background: none; border: none; transition: transform 0.2s; }
+        .screenshot-modal .close-btn:hover { transform: scale(1.2); }
+        .screenshot-modal .screenshot-info { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); color: #ccc; background: rgba(0,0,0,0.6); padding: 8px 20px; border-radius: 20px; font-size: 14px; backdrop-filter: blur(10px); }
+        
+        .features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .feature { text-align: center; padding: 12px; background: #f8f9fa; border-radius: 8px; font-size: 14px; color: #555; }
+        .feature span { display: block; font-size: 24px; margin-bottom: 5px; }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 1000; max-width: 90%; }
+        .toast.show { opacity: 1; }
+        .source-badge { display: inline-block; padding: 2px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; background: #fff3cd; color: #856404; }
         
         @media (max-width: 600px) {
             .card { padding: 20px; }
@@ -498,7 +77,6 @@
             .features { grid-template-columns: 1fr; }
             .button-group { flex-direction: column; }
             .result .value { float: none; display: block; max-width: 100%; }
-            .result .value.url-value { max-width: 100%; }
             .screenshots-grid { grid-template-columns: 1fr 1fr; }
             .screenshot-item img { height: 100px; }
         }
@@ -511,15 +89,8 @@
             <p class="subtitle">Download any Instagram video in seconds</p>
             
             <div class="input-group">
-                <input 
-                    type="url" 
-                    id="urlInput" 
-                    placeholder="Paste Instagram video URL here..."
-                    autocomplete="off"
-                >
-                <button id="downloadBtn" onclick="handleDownload()">
-                    Download
-                </button>
+                <input type="url" id="urlInput" placeholder="Paste Instagram video URL here..." autocomplete="off">
+                <button id="downloadBtn" onclick="handleDownload()">Download</button>
             </div>
             
             <div id="errorMessage" class="error"></div>
@@ -539,9 +110,7 @@
                         <span class="url-text" id="urlText">Loading URL...</span>
                         <button class="copy-small" onclick="copyUrl()">📋 Copy</button>
                     </div>
-                    <div style="font-size: 11px; color: #888; margin-top: 5px;">
-                        🔗 This is the direct download URL from rapidcdn.app
-                    </div>
+                    <div style="font-size: 11px; color: #888; margin-top: 5px;">🔗 This is the direct download URL from rapidcdn.app</div>
                 </div>
                 
                 <div class="button-group">
@@ -549,35 +118,20 @@
                     <button class="btn btn-copy" onclick="copyUrl()">📋 Copy URL</button>
                 </div>
                 
-                <!-- Screenshots Section -->
                 <div id="screenshotsSection" class="screenshots-section" style="display:none;">
                     <h4>📸 Debug Screenshots <span class="count" id="screenshotCount">0</span></h4>
                     <div id="screenshotsGrid" class="screenshots-grid"></div>
-                    <p style="font-size: 11px; color: #999; margin-top: 10px; text-align: center;">
-                        Click any screenshot to enlarge
-                    </p>
+                    <p style="font-size: 11px; color: #999; margin-top: 10px; text-align: center;">Click any screenshot to enlarge</p>
                 </div>
                 
                 <button class="btn-reset" onclick="resetForm()">🔄 New Download</button>
             </div>
             
             <div class="features">
-                <div class="feature">
-                    <span>🚀</span>
-                    Fast downloads
-                </div>
-                <div class="feature">
-                    <span>🎯</span>
-                    No registration
-                </div>
-                <div class="feature">
-                    <span>🔒</span>
-                    Secure & private
-                </div>
-                <div class="feature">
-                    <span>📱</span>
-                    Works with any Instagram video
-                </div>
+                <div class="feature"><span>🚀</span>Fast downloads</div>
+                <div class="feature"><span>🎯</span>No registration</div>
+                <div class="feature"><span>🔒</span>Secure & private</div>
+                <div class="feature"><span>📱</span>Works with any Instagram video</div>
             </div>
         </div>
     </div>
@@ -589,7 +143,6 @@
         <div id="modalInfo" class="screenshot-info"></div>
     </div>
 
-    <!-- Toast notification -->
     <div id="toast" class="toast">✅ Copied to clipboard!</div>
 
     <script>
@@ -601,50 +154,29 @@
             const downloadBtn = document.getElementById('downloadBtn');
             const errorDiv = document.getElementById('errorMessage');
             const resultSection = document.getElementById('resultSection');
-            const screenshotsSection = document.getElementById('screenshotsSection');
             
             const url = urlInput.value.trim();
             
-            if (!url) {
-                showError('Please enter an Instagram video URL');
-                return;
-            }
-            
-            if (!url.includes('instagram.com')) {
-                showError('Please enter a valid Instagram URL');
-                return;
-            }
+            if (!url) { showError('Please enter an Instagram video URL'); return; }
+            if (!url.includes('instagram.com')) { showError('Please enter a valid Instagram URL'); return; }
 
             downloadBtn.disabled = true;
             downloadBtn.innerHTML = '⏳ Downloading...';
             hideError();
             resultSection.style.display = 'none';
-            screenshotsSection.style.display = 'none';
+            document.getElementById('screenshotsSection').style.display = 'none';
             screenshots = [];
 
             try {
                 const response = await fetch('/api/download', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
                 });
 
                 const data = await response.json();
 
-                if (!response.ok) {
-                    // Check if we have screenshots in the error response
-                    if (data.screenshots && data.screenshots.length > 0) {
-                        screenshots = data.screenshots;
-                        showErrorWithScreenshots(data.error || data.message || 'Download failed');
-                    } else {
-                        throw new Error(data.error || 'Download failed');
-                    }
-                    return;
-                }
-
-                if (!data.success) {
+                if (!response.ok || !data.success) {
                     if (data.screenshots && data.screenshots.length > 0) {
                         screenshots = data.screenshots;
                         showErrorWithScreenshots(data.error || 'Download failed');
@@ -666,7 +198,6 @@
 
         function showResult(data) {
             const resultSection = document.getElementById('resultSection');
-            const resultTitle = document.getElementById('resultTitle');
             const filename = document.getElementById('filename');
             const fileSize = document.getElementById('fileSize');
             const downloadTime = document.getElementById('downloadTime');
@@ -680,26 +211,19 @@
             filename.textContent = data.filename;
             fileSize.textContent = data.fileSize;
             downloadTime.textContent = data.downloadTime || 'N/A';
-            
-            // Show source with badge
-            const sourceText = data.source || 'Video Service';
-            const sourceBadge = sourceText === 'igvideourl_service' ? 'service' : 'snapsave';
-            source.innerHTML = `<span class="source-badge ${sourceBadge}">${sourceText === 'igvideourl_service' ? '🚀 Video Service' : '📸 Snapsave'}</span>`;
+            source.innerHTML = `<span class="source-badge">📸 Snapsave</span>`;
             
             downloadLink.href = directUrl;
             downloadLink.target = '_blank';
             urlText.textContent = directUrl;
             
             resultSection.className = 'result success';
-            resultTitle.textContent = '✅ Download Ready!';
+            document.getElementById('resultTitle').textContent = '✅ Download Ready!';
             resultSection.style.display = 'block';
             
-            // Show screenshots if available
             if (data.screenshots && data.screenshots.length > 0) {
                 screenshots = data.screenshots;
                 renderScreenshots(screenshots);
-            } else {
-                document.getElementById('screenshotsSection').style.display = 'none';
             }
             
             resultSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -707,24 +231,14 @@
 
         function showErrorWithScreenshots(message) {
             const resultSection = document.getElementById('resultSection');
-            const resultTitle = document.getElementById('resultTitle');
-            
-            // Show error in result section with screenshots
             resultSection.className = 'result error-result';
-            resultTitle.textContent = '❌ Download Failed';
+            document.getElementById('resultTitle').textContent = '❌ Download Failed';
             resultSection.style.display = 'block';
             
-            // Show screenshots
-            if (screenshots.length > 0) {
-                renderScreenshots(screenshots);
-            }
+            if (screenshots.length > 0) renderScreenshots(screenshots);
             
-            // Also show in error div
             const errorDiv = document.getElementById('errorMessage');
-            errorDiv.innerHTML = `
-                <strong>❌ ${message}</strong>
-                ${screenshots.length > 0 ? `<div class="error-details">📸 ${screenshots.length} screenshots captured for debugging</div>` : ''}
-            `;
+            errorDiv.innerHTML = `<strong>❌ ${message}</strong>${screenshots.length > 0 ? `<div class="error-details">📸 ${screenshots.length} screenshots captured for debugging</div>` : ''}`;
             errorDiv.style.display = 'block';
             
             resultSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -744,14 +258,11 @@
             count.textContent = screenshotList.length;
             grid.innerHTML = '';
             
-            screenshotList.forEach((ss, index) => {
+            screenshotList.forEach((ss) => {
                 const item = document.createElement('div');
                 item.className = 'screenshot-item';
-                item.title = `Step ${ss.step}: ${ss.description}`;
                 item.innerHTML = `
-                    <img src="${ss.url}" alt="${ss.description}" loading="lazy" 
-                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22200%22 height=%22150%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2214%22 font-family=%22Arial%22%3E📸%3C/text%3E%3C/svg%3E'"
-                         onclick="openScreenshotModal('${ss.url}', '${ss.step}: ${ss.description}')">
+                    <img src="${ss.url}" alt="${ss.description}" loading="lazy" onclick="openScreenshotModal('${ss.url}', '${ss.step}: ${ss.description}')">
                     <div class="caption"><span class="step-badge">${ss.step}</span> ${ss.description}</div>
                 `;
                 grid.appendChild(item);
@@ -759,14 +270,9 @@
         }
 
         function openScreenshotModal(url, caption) {
-            const modal = document.getElementById('screenshotModal');
-            const img = document.getElementById('modalImage');
-            const info = document.getElementById('modalInfo');
-            
-            img.src = url;
-            img.alt = caption;
-            info.textContent = caption;
-            modal.classList.add('active');
+            document.getElementById('modalImage').src = url;
+            document.getElementById('modalInfo').textContent = caption;
+            document.getElementById('screenshotModal').classList.add('active');
             document.body.style.overflow = 'hidden';
         }
 
@@ -776,28 +282,17 @@
         }
 
         function copyUrl() {
-            if (!currentDownloadUrl) {
-                showToast('No URL to copy yet!');
-                return;
-            }
-
+            if (!currentDownloadUrl) { showToast('No URL to copy yet!'); return; }
             if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(currentDownloadUrl)
-                    .then(() => {
-                        showToast('✅ Direct download URL copied to clipboard!');
-                        const copyBtn = document.querySelector('.btn-copy');
-                        if (copyBtn) {
-                            copyBtn.classList.add('copied');
-                            copyBtn.textContent = '✅ Copied!';
-                            setTimeout(() => {
-                                copyBtn.classList.remove('copied');
-                                copyBtn.textContent = '📋 Copy URL';
-                            }, 2000);
-                        }
-                    })
-                    .catch(() => {
-                        fallbackCopy(currentDownloadUrl);
-                    });
+                navigator.clipboard.writeText(currentDownloadUrl).then(() => {
+                    showToast('✅ Direct download URL copied to clipboard!');
+                    const copyBtn = document.querySelector('.btn-copy');
+                    if (copyBtn) {
+                        copyBtn.classList.add('copied');
+                        copyBtn.textContent = '✅ Copied!';
+                        setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.textContent = '📋 Copy URL'; }, 2000);
+                    }
+                }).catch(() => fallbackCopy(currentDownloadUrl));
             } else {
                 fallbackCopy(currentDownloadUrl);
             }
@@ -808,23 +303,12 @@
             input.value = text;
             document.body.appendChild(input);
             input.select();
-            
             try {
                 document.execCommand('copy');
                 showToast('✅ Direct download URL copied to clipboard!');
-                const copyBtn = document.querySelector('.btn-copy');
-                if (copyBtn) {
-                    copyBtn.classList.add('copied');
-                    copyBtn.textContent = '✅ Copied!';
-                    setTimeout(() => {
-                        copyBtn.classList.remove('copied');
-                        copyBtn.textContent = '📋 Copy URL';
-                    }, 2000);
-                }
             } catch (err) {
                 showToast('❌ Failed to copy. Please select and copy manually.');
             }
-            
             document.body.removeChild(input);
         }
 
@@ -832,63 +316,44 @@
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.classList.add('show');
-            
             clearTimeout(toast.timeout);
-            toast.timeout = setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3000);
+            toast.timeout = setTimeout(() => toast.classList.remove('show'), 3000);
         }
 
         function showError(message) {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').style.display = 'block';
         }
 
         function hideError() {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
         }
 
         function resetForm() {
-            const urlInput = document.getElementById('urlInput');
-            const resultSection = document.getElementById('resultSection');
-            const errorDiv = document.getElementById('errorMessage');
-            const screenshotsSection = document.getElementById('screenshotsSection');
-            
-            urlInput.value = '';
-            resultSection.style.display = 'none';
-            errorDiv.style.display = 'none';
-            screenshotsSection.style.display = 'none';
+            document.getElementById('urlInput').value = '';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('screenshotsSection').style.display = 'none';
             currentDownloadUrl = '';
             screenshots = [];
-            urlInput.focus();
             closeScreenshotModal();
+            document.getElementById('urlInput').focus();
         }
 
-        // Keyboard shortcuts
         document.getElementById('urlInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                handleDownload();
-            }
+            if (e.key === 'Enter') handleDownload();
         });
 
-        // Close modal with ESC
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                closeScreenshotModal();
-            }
+            if (e.key === 'Escape') closeScreenshotModal();
         });
 
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('urlInput').focus();
         });
 
-        // Handle click outside modal to close
         document.getElementById('screenshotModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeScreenshotModal();
-            }
+            if (e.target === this) closeScreenshotModal();
         });
     </script>
 </body>
