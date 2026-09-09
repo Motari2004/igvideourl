@@ -58,6 +58,7 @@ function logRequest(level, message, data = null) {
         requestLog.shift();
     }
     
+    // Also log to console with timestamp
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${level}: ${message}`);
     if (data) {
@@ -74,6 +75,7 @@ let browserInitPromise = null;
 let isBrowserReady = false;
 
 function findChromePath() {
+  // Render-specific paths
   const renderPaths = [
     '/usr/bin/google-chrome',
     '/usr/bin/chromium',
@@ -168,18 +170,20 @@ async function handleAds(page) {
   }
 }
 
-// ============== SEND VIDEO URL TO VERCEL WEBHOOK (NO CAPTION) ==============
+// ============== SEND TO VERCEL WEBHOOK ==============
 
-async function sendVideoUrlToVercel(instagramUrl, videoUrl) {
+async function sendToVercel(instagramUrl, videoUrl, caption) {
     try {
-        logRequest('INFO', `📤 Sending video URL to Vercel webhook...`, { 
+        logRequest('INFO', `📤 Sending to Vercel webhook...`, { 
             instagramUrl: instagramUrl.substring(0, 50) + '...',
-            videoUrl: videoUrl.substring(0, 50) + '...'
+            videoUrl: videoUrl.substring(0, 50) + '...',
+            captionLength: caption ? caption.length : 0
         });
         
         const payload = {
             reel_url: instagramUrl,
-            video_url: videoUrl,  // ✅ Only video URL, no caption
+            video_url: videoUrl,
+            caption: caption || '',
             status: 'completed',
             timestamp: new Date().toISOString(),
             source: 'fitydown_scraper'
@@ -196,7 +200,7 @@ async function sendVideoUrlToVercel(instagramUrl, videoUrl) {
         });
         
         if (response.ok) {
-            logRequest('INFO', `✅ Successfully sent video URL to Vercel webhook`, { status: response.status });
+            logRequest('INFO', `✅ Successfully sent to Vercel webhook`, { status: response.status });
             return true;
         } else {
             logRequest('WARN', `⚠️ Vercel webhook returned ${response.status}`);
@@ -208,13 +212,14 @@ async function sendVideoUrlToVercel(instagramUrl, videoUrl) {
     }
 }
 
-// ============== DOWNLOAD VIDEO URL ONLY (NO CAPTION) ==============
+// ============== DOWNLOAD VIA INSTADL.FITYDOWN.COM ==============
 
-async function downloadVideoUrlOnly(instagramUrl) {
-  logRequest('INFO', `📥 Processing video URL only for: ${instagramUrl.substring(0, 60)}...`);
+async function downloadViaFitydown(instagramUrl) {
+  logRequest('INFO', `📥 Processing via instadl.fitydown.com...`, { url: instagramUrl.substring(0, 60) + '...' });
   
   let page = null;
   const startTime = Date.now();
+  let caption = '';
   let downloadUrl = null;
   let stepTimings = {};
   let stepStart = Date.now();
@@ -242,13 +247,13 @@ async function downloadVideoUrlOnly(instagramUrl) {
 
     // Step 3: Enable network interception
     stepStart = Date.now();
-    logRequest('INFO', '🔍 Step 3: Setting up network interception for video URLs...');
+    logRequest('INFO', '🔍 Step 3: Setting up network interception...');
     await page.route('**/*', async (route) => {
       const url = route.request().url();
       
       if (url.includes('fitydown.onrender.com/download_file/')) {
         downloadUrl = url;
-        logRequest('INFO', `✅ Intercepted video URL: ${downloadUrl.substring(0, 60)}...`);
+        logRequest('INFO', `✅ Intercepted FityDown URL: ${downloadUrl}`);
       }
       
       if (url.includes('.mp4') || url.includes('video')) {
@@ -332,19 +337,19 @@ async function downloadVideoUrlOnly(instagramUrl) {
 
     // Step 10: Wait for URL interception
     stepStart = Date.now();
-    logRequest('INFO', '⏳ Step 10: Waiting for video URL to be intercepted...');
+    logRequest('INFO', '⏳ Step 10: Waiting for download URL to be intercepted...');
     let attempts = 0;
     while (!downloadUrl && attempts < 30) {
       await page.waitForTimeout(1000);
       attempts++;
       if (attempts % 5 === 0) {
-        logRequest('INFO', `⏳ Waiting for video URL... (${attempts}s)`);
+        logRequest('INFO', `⏳ Waiting for download URL... (${attempts}s)`);
       }
     }
     stepTimings.urlWait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     
     if (downloadUrl) {
-      logRequest('INFO', `✅ Video URL intercepted in ${stepTimings.urlWait}`);
+      logRequest('INFO', `✅ Download URL intercepted in ${stepTimings.urlWait}`);
     } else {
       logRequest('WARN', `⚠️ No URL intercepted after ${attempts}s`);
     }
@@ -360,10 +365,10 @@ async function downloadVideoUrlOnly(instagramUrl) {
         if (matches && matches.length > 0) {
           downloadUrl = matches[0];
           stepTimings.htmlCheck = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
-          logRequest('INFO', `✅ Found video URL in HTML: ${downloadUrl.substring(0, 60)}...`);
+          logRequest('INFO', `✅ Found FityDown URL in HTML: ${downloadUrl.substring(0, 60)}...`);
         } else {
           stepTimings.htmlCheck = 'no match';
-          logRequest('WARN', '⚠️ No video URL found in HTML content');
+          logRequest('WARN', '⚠️ No URL found in HTML content');
         }
       } catch (error) {
         stepTimings.htmlCheck = 'error';
@@ -373,7 +378,7 @@ async function downloadVideoUrlOnly(instagramUrl) {
 
     // Step 12: Error if no URL
     if (!downloadUrl) {
-      logRequest('ERROR', '❌ Step 12: Could not find video URL');
+      logRequest('ERROR', '❌ Step 12: Could not find download URL');
       try {
         const screenshotPath = path.join(DEBUG_DIR, `error_${Date.now()}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -381,17 +386,41 @@ async function downloadVideoUrlOnly(instagramUrl) {
       } catch (e) {
         logRequest('ERROR', `❌ Screenshot error: ${e.message}`);
       }
-      throw new Error('Could not find video URL');
+      throw new Error('Could not find download URL');
     }
 
-    logRequest('INFO', `✅ Video URL captured: ${downloadUrl}`);
+    logRequest('INFO', `✅ Download URL captured: ${downloadUrl}`);
 
-    // ✅ SKIP CAPTION - Only return video URL
+    // Step 13: Get caption
+    stepStart = Date.now();
+    logRequest('INFO', '📝 Step 13: Getting caption...');
+    try {
+      const captionEl = await page.locator('.caption, .description, [class*="caption"]').first();
+      if (await captionEl.isVisible({ timeout: 2000 })) {
+        const text = await captionEl.textContent();
+        if (text && text.trim().length > 10 && 
+            !text.includes('Error') && 
+            !text.includes('Download')) {
+          caption = text.trim();
+          stepTimings.captionFetch = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+          logRequest('INFO', `✅ Caption found (${caption.length} chars): ${caption.substring(0, 50)}...`);
+        } else {
+          stepTimings.captionFetch = 'empty or invalid';
+          logRequest('INFO', 'ℹ️ No valid caption found');
+        }
+      } else {
+        stepTimings.captionFetch = 'not visible';
+        logRequest('INFO', 'ℹ️ Caption element not visible');
+      }
+    } catch (error) {
+      stepTimings.captionFetch = 'error';
+      logRequest('WARN', `⚠️ Caption fetch error: ${error.message}`);
+    }
 
-    // Step 13: Final wait before closing
-    logRequest('INFO', '⏳ Step 13: Waiting 3 seconds before closing...');
-    await page.waitForTimeout(3000);
-    stepTimings.finalWait = '3s';
+    // Step 14: Final wait
+    logRequest('INFO', '⏳ Step 14: Waiting 5 seconds before closing...');
+    await page.waitForTimeout(5000);
+    stepTimings.finalWait = '5s';
 
     // Calculate total time
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -412,9 +441,10 @@ async function downloadVideoUrlOnly(instagramUrl) {
       originalUrl: instagramUrl,
       isDirectUrl: true,
       source: 'fitydown',
+      caption: caption || '',
       videoUrl: downloadUrl,
       timings: stepTimings,
-      logs: requestLog.slice(-20)
+      logs: requestLog.slice(-20) // Last 20 log entries
     };
 
   } catch (error) {
@@ -436,18 +466,17 @@ async function downloadVideoUrlOnly(instagramUrl) {
 // ============== MAIN DOWNLOAD FUNCTION ==============
 
 async function downloadVideo(instagramUrl) {
-  logRequest('INFO', `\n📥 Processing video URL for: ${instagramUrl.substring(0, 60)}...`);
+  logRequest('INFO', `\n📥 Processing: ${instagramUrl.substring(0, 60)}...`);
   
   try {
-    const result = await downloadVideoUrlOnly(instagramUrl);
+    const result = await downloadViaFitydown(instagramUrl);
     
     if (result && result.success) {
       logRequest('INFO', `✅ Video URL captured!`, { 
         url: result.downloadUrl.substring(0, 50) + '...',
         time: result.downloadTime
       });
-      // ✅ Send ONLY video URL to Vercel (no caption)
-      await sendVideoUrlToVercel(instagramUrl, result.downloadUrl);
+      await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
       return result;
     }
     
@@ -500,7 +529,8 @@ app.post('/api/download', async (req, res) => {
     
     logRequest('INFO', `[${requestId}] ✅ Download successful`, {
       url: result.downloadUrl.substring(0, 50) + '...',
-      time: result.downloadTime
+      time: result.downloadTime,
+      hasCaption: !!result.caption
     });
     
     res.json({
@@ -528,6 +558,7 @@ app.post('/api/download', async (req, res) => {
 
 // ============== LOGGING ENDPOINTS ==============
 
+// Get recent logs
 app.get('/api/logs', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const logs = requestLog.slice(-limit);
@@ -539,6 +570,7 @@ app.get('/api/logs', (req, res) => {
   });
 });
 
+// Get request stats
 app.get('/api/stats', (req, res) => {
   res.json({
     status: 'ok',
@@ -552,6 +584,7 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+// Health check with details
 app.get('/health', async (req, res) => {
   const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
   res.json({
@@ -571,12 +604,15 @@ app.get('/health', async (req, res) => {
   });
 });
 
+// Serve downloaded files
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
+// Serve frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// 404 handler
 app.use((req, res) => {
   logRequest('WARN', `404: ${req.method} ${req.url}`);
   res.status(404).json({
@@ -585,6 +621,7 @@ app.use((req, res) => {
   });
 });
 
+// Error handler
 app.use((err, req, res, next) => {
   logRequest('ERROR', `Server error: ${err.message}`);
   logRequest('ERROR', `Stack: ${err.stack}`);
@@ -639,9 +676,10 @@ process.on('uncaughtException', (error) => {
   logRequest('ERROR', `Stack: ${error.stack}`);
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
-  console.log('🚀 Instagram Video URL Service');
+  console.log('🚀 Instagram Video Downloader (instadl.fitydown.com)');
   console.log('═'.repeat(60));
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📡 Mode: ${isRender ? 'Render (headless)' : 'Local (visible)'}`);
