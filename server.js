@@ -168,18 +168,24 @@ async function handleAds(page) {
   }
 }
 
-// ============== SEND VIDEO URL TO VERCEL WEBHOOK (NO CAPTION) ==============
+// ============== SEND VIDEO URL TO VERCEL WEBHOOK WITH PIPELINE & POST ID ==============
 
-async function sendVideoUrlToVercel(instagramUrl, videoUrl) {
+async function sendVideoUrlToVercel(instagramUrl, videoUrl, pipelineId = null, postId = null, profileUsername = null) {
     try {
         logRequest('INFO', `📤 Sending video URL to Vercel webhook...`, { 
             instagramUrl: instagramUrl.substring(0, 50) + '...',
-            videoUrl: videoUrl.substring(0, 50) + '...'
+            videoUrl: videoUrl.substring(0, 50) + '...',
+            pipelineId: pipelineId || 'None',
+            postId: postId || 'None',
+            profileUsername: profileUsername || 'None'
         });
         
         const payload = {
             reel_url: instagramUrl,
-            video_url: videoUrl,  // ✅ Only video URL, no caption
+            video_url: videoUrl,
+            pipeline_id: pipelineId,           // ✅ Forward pipeline_id
+            post_id: postId,                   // ✅ Forward post_id
+            profile_username: profileUsername, // ✅ Forward profile username
             status: 'completed',
             timestamp: new Date().toISOString(),
             source: 'fitydown_scraper'
@@ -386,8 +392,6 @@ async function downloadVideoUrlOnly(instagramUrl) {
 
     logRequest('INFO', `✅ Video URL captured: ${downloadUrl}`);
 
-    // ✅ SKIP CAPTION - Only return video URL
-
     // Step 13: Final wait before closing
     logRequest('INFO', '⏳ Step 13: Waiting 3 seconds before closing...');
     await page.waitForTimeout(3000);
@@ -396,7 +400,6 @@ async function downloadVideoUrlOnly(instagramUrl) {
     // Calculate total time
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     
-    // Log all timings
     logRequest('INFO', '📊 TIMING SUMMARY:', {
       totalTime: `${totalTime}s`,
       steps: stepTimings
@@ -435,8 +438,11 @@ async function downloadVideoUrlOnly(instagramUrl) {
 
 // ============== MAIN DOWNLOAD FUNCTION ==============
 
-async function downloadVideo(instagramUrl) {
+async function downloadVideo(instagramUrl, pipelineId = null, postId = null, profileUsername = null) {
   logRequest('INFO', `\n📥 Processing video URL for: ${instagramUrl.substring(0, 60)}...`);
+  logRequest('INFO', `   Pipeline ID: ${pipelineId || 'None'}`);
+  logRequest('INFO', `   Post ID: ${postId || 'None'}`);
+  logRequest('INFO', `   Profile Username: ${profileUsername || 'None'}`);
   
   try {
     const result = await downloadVideoUrlOnly(instagramUrl);
@@ -446,8 +452,15 @@ async function downloadVideo(instagramUrl) {
         url: result.downloadUrl.substring(0, 50) + '...',
         time: result.downloadTime
       });
-      // ✅ Send ONLY video URL to Vercel (no caption)
-      await sendVideoUrlToVercel(instagramUrl, result.downloadUrl);
+      
+      // ✅ Send video URL with pipeline_id, post_id, and profile_username
+      await sendVideoUrlToVercel(
+        instagramUrl, 
+        result.downloadUrl, 
+        pipelineId, 
+        postId, 
+        profileUsername
+      );
       return result;
     }
     
@@ -472,7 +485,7 @@ app.post('/api/download', async (req, res) => {
   });
   
   try {
-    const { url } = req.body;
+    const { url, pipeline_id, post_id, profile_username } = req.body;
     
     if (!url) {
       activeRequests--;
@@ -495,8 +508,11 @@ app.post('/api/download', async (req, res) => {
     }
 
     logRequest('INFO', `[${requestId}] Processing URL: ${url.substring(0, 60)}...`);
+    logRequest('INFO', `[${requestId}] Pipeline ID: ${pipeline_id || 'None'}`);
+    logRequest('INFO', `[${requestId}] Post ID: ${post_id || 'None'}`);
+    logRequest('INFO', `[${requestId}] Profile Username: ${profile_username || 'None'}`);
     
-    const result = await downloadVideo(url);
+    const result = await downloadVideo(url, pipeline_id, post_id, profile_username);
     
     logRequest('INFO', `[${requestId}] ✅ Download successful`, {
       url: result.downloadUrl.substring(0, 50) + '...',
@@ -508,7 +524,10 @@ app.post('/api/download', async (req, res) => {
       requestId: requestId,
       data: {
         ...result,
-        webhook_sent: true
+        webhook_sent: true,
+        pipeline_id: pipeline_id,
+        post_id: post_id,
+        profile_username: profile_username
       }
     });
 
