@@ -58,6 +58,7 @@ function logRequest(level, message, data = null) {
         requestLog.shift();
     }
     
+    // Also log to console with timestamp
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${level}: ${message}`);
     if (data) {
@@ -65,7 +66,7 @@ function logRequest(level, message, data = null) {
     }
 }
 
-// ============== BROWSER SETUP FOR RENDER ==============
+// ============== BROWSER SETUP ==============
 
 const { chromium } = require('playwright');
 
@@ -73,19 +74,16 @@ let browser = null;
 let browserInitPromise = null;
 let isBrowserReady = false;
 
-// ✅ Render-specific Chrome path finder
 function findChromePath() {
-  // Render-specific paths (in order of priority)
+  // Render-specific paths
   const renderPaths = [
     '/usr/bin/google-chrome',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/opt/render/.cache/ms-playwright/chromium-1234/chrome-linux/chrome',
-    '/opt/render/.cache/ms-playwright/chromium-1200/chrome-linux/chrome',
-    '/opt/render/.cache/ms-playwright/chromium-1124/chrome-linux/chrome'
+    '/opt/render/.cache/ms-playwright/chromium-1200/chrome-linux/chrome'
   ];
   
-  // Local development paths
   const localPaths = [
     'C:\\Users\\PC\\AppData\\Local\\ms-playwright\\chromium-1234\\chrome-win\\chrome.exe',
     'C:\\Users\\PC\\AppData\\Local\\ms-playwright\\chromium-1200\\chrome-win\\chrome.exe',
@@ -101,13 +99,13 @@ function findChromePath() {
   for (const path of paths) {
     try {
       if (fs.existsSync(path)) {
-        logRequest('INFO', `✅ Found browser at: ${path}`);
+        logRequest('INFO', `Found browser at: ${path}`);
         return path;
       }
     } catch (e) {}
   }
   
-  logRequest('WARN', '⚠️ No browser found, using Playwright default');
+  logRequest('WARN', 'No browser found, using Playwright default');
   return null;
 }
 
@@ -115,11 +113,11 @@ const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
 
 async function initBrowser() {
   if (browser && isBrowserReady && !isShuttingDown) {
-    logRequest('INFO', '♻️ Browser already ready, reusing instance');
+    logRequest('INFO', 'Browser already ready, reusing instance');
     return browser;
   }
   if (browserInitPromise) {
-    logRequest('INFO', '⏳ Browser initialization in progress, waiting...');
+    logRequest('INFO', 'Browser initialization in progress, waiting...');
     return browserInitPromise;
   }
 
@@ -129,9 +127,8 @@ async function initBrowser() {
       
       const executablePath = findChromePath();
 
-      // ✅ Render-specific launch options
       browser = await chromium.launch({
-        headless: true, // ✅ Always headless on Render
+        headless: true,
         executablePath: executablePath || undefined,
         args: [
           '--no-sandbox',
@@ -146,19 +143,12 @@ async function initBrowser() {
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
-          '--disable-ipc-flooding-protection',
-          // ✅ Additional Render-specific flags
-          '--disable-accelerated-2d-canvas',
-          '--disable-accelerated-jpeg-decoding',
-          '--disable-accelerated-mjpeg-decode',
-          '--disable-accelerated-video-decode',
-          '--disable-accelerated-video-encode',
-          '--disable-software-rasterizer'
+          '--disable-ipc-flooding-protection'
         ]
       });
 
       isBrowserReady = true;
-      logRequest('INFO', '✅ Browser launched successfully on Render (headless)');
+      logRequest('INFO', '✅ Browser launched successfully (headless)');
       return browser;
     } catch (error) {
       logRequest('ERROR', `❌ Failed to launch browser: ${error.message}`);
@@ -174,33 +164,29 @@ async function initBrowser() {
 async function handleAds(page) {
   try {
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(500);
     return true;
   } catch (error) {
     return false;
   }
 }
 
-// ============== SEND VIDEO URL TO VERCEL WEBHOOK ==============
+// ============== SEND TO VERCEL WEBHOOK ==============
 
-async function sendVideoUrlToVercel(instagramUrl, videoUrl, pipelineId = null, postId = null, profileUsername = null) {
+async function sendToVercel(instagramUrl, videoUrl, caption) {
     try {
-        logRequest('INFO', `📤 Sending video URL to Vercel webhook...`, { 
+        logRequest('INFO', `📤 Sending to Vercel webhook...`, { 
             instagramUrl: instagramUrl.substring(0, 50) + '...',
             videoUrl: videoUrl.substring(0, 50) + '...',
-            pipelineId: pipelineId || 'None',
-            postId: postId || 'None'
+            captionLength: caption ? caption.length : 0
         });
         
         const payload = {
             reel_url: instagramUrl,
             video_url: videoUrl,
-            pipeline_id: pipelineId,
-            post_id: postId,
-            profile_username: profileUsername,
+            caption: caption || '',
             status: 'completed',
             timestamp: new Date().toISOString(),
-            source: 'fdown_vn_scraper'
+            source: 'fitydown_scraper'
         };
         
         const response = await fetch(VERCEL_WEBHOOK_URL, {
@@ -214,7 +200,7 @@ async function sendVideoUrlToVercel(instagramUrl, videoUrl, pipelineId = null, p
         });
         
         if (response.ok) {
-            logRequest('INFO', `✅ Successfully sent video URL to Vercel webhook`, { status: response.status });
+            logRequest('INFO', `✅ Successfully sent to Vercel webhook`, { status: response.status });
             return true;
         } else {
             logRequest('WARN', `⚠️ Vercel webhook returned ${response.status}`);
@@ -226,13 +212,14 @@ async function sendVideoUrlToVercel(instagramUrl, videoUrl, pipelineId = null, p
     }
 }
 
-// ============== DOWNLOAD VIA FDOWN.VN (RENDER OPTIMIZED) ==============
+// ============== DOWNLOAD VIA INSTADL.FITYDOWN.COM ==============
 
-async function downloadViaFdown(instagramUrl) {
-  logRequest('INFO', `📥 Processing via fdown.vn for: ${instagramUrl.substring(0, 60)}...`);
+async function downloadViaFitydown(instagramUrl) {
+  logRequest('INFO', `📥 Processing via instadl.fitydown.com...`, { url: instagramUrl.substring(0, 60) + '...' });
   
   let page = null;
   const startTime = Date.now();
+  let caption = '';
   let downloadUrl = null;
   let stepTimings = {};
   let stepStart = Date.now();
@@ -258,31 +245,21 @@ async function downloadViaFdown(instagramUrl) {
     stepTimings.pageCreate = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ Page created in ${stepTimings.pageCreate}`);
 
-    // Step 3: Enable network interception - target the media/ig-stream URL
+    // Step 3: Enable network interception
     stepStart = Date.now();
     logRequest('INFO', '🔍 Step 3: Setting up network interception...');
     await page.route('**/*', async (route) => {
       const url = route.request().url();
       
-      // ✅ Target the EXACT fdown.vn media/ig-stream URL pattern
-      if (url.includes('fdown.vn/media/ig-stream/')) {
+      if (url.includes('fitydown.onrender.com/download_file/')) {
         downloadUrl = url;
-        logRequest('INFO', `✅ Captured fdown video URL: ${downloadUrl.substring(0, 80)}...`);
+        logRequest('INFO', `✅ Intercepted FityDown URL: ${downloadUrl}`);
       }
       
-      // Also capture the API response
-      if (url.includes('/api/instagram/download')) {
-        try {
-          const response = await route.fetch();
-          const body = await response.json();
-          if (body && body.url && body.url.includes('fdown.vn/media/ig-stream/')) {
-            downloadUrl = body.url;
-            logRequest('INFO', `✅ Captured video URL from API: ${downloadUrl.substring(0, 80)}...`);
-          }
-          await route.fulfill({ response });
-          return;
-        } catch (e) {
-          // If parsing fails, continue
+      if (url.includes('.mp4') || url.includes('video')) {
+        if (!downloadUrl) {
+          downloadUrl = url;
+          logRequest('INFO', `✅ Intercepted video URL: ${downloadUrl.substring(0, 60)}...`);
         }
       }
       
@@ -291,180 +268,107 @@ async function downloadViaFdown(instagramUrl) {
     stepTimings.networkSetup = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ Network interception setup in ${stepTimings.networkSetup}`);
 
-    // Step 4: Navigate to fdown.vn
+    // Step 4: Navigate to fitydown
     stepStart = Date.now();
-    logRequest('INFO', '🌐 Step 4: Navigating to fdown.vn...');
-    await page.goto('https://fdown.vn/en/instagram-downloader', { 
-      waitUntil: 'networkidle',
+    logRequest('INFO', '🌐 Step 4: Navigating to instadl.fitydown.com...');
+    await page.goto('https://instadl.fitydown.com/', { 
+      waitUntil: 'domcontentloaded',
       timeout: 30000
     });
     stepTimings.navigate = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ Navigation completed in ${stepTimings.navigate}`);
     
-    // Step 5: Wait for page to load
-    logRequest('INFO', '⏳ Waiting for page to fully load...');
     await page.waitForTimeout(2000);
     logRequest('INFO', '⏳ Waited 2s for page to stabilize');
 
-    // Step 6: Handle any popups/ads
+    // Step 5: Handle ads
     stepStart = Date.now();
-    logRequest('INFO', '🛡️ Step 6: Handling ads/popups...');
+    logRequest('INFO', '🛡️ Step 5: Handling ads...');
     await handleAds(page);
     stepTimings.adHandling = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ Ads handled in ${stepTimings.adHandling}`);
 
-    // Step 7: Enter URL using the textbox
+    // Step 6: Enter URL
     stepStart = Date.now();
-    logRequest('INFO', '✏️ Step 7: Entering URL into textbox...');
-    
-    try {
-      const urlInput = await page.getByRole('textbox', { name: 'Paste the Instagram link here...' });
-      await urlInput.fill(instagramUrl);
-      logRequest('INFO', '✅ URL entered using textbox');
-    } catch (e) {
-      logRequest('WARN', `⚠️ Textbox not found, trying alternative selectors...`);
-      const urlInput = await page.locator('input[type="text"], input[placeholder*="link"], input[name="url"]').first();
-      await urlInput.fill(instagramUrl);
-      logRequest('INFO', '✅ URL entered using alternative selector');
-    }
-    
+    logRequest('INFO', '✏️ Step 6: Entering URL...');
+    const urlInput = page.getByRole('textbox', { name: 'Instagram video URL' });
+    await urlInput.fill(instagramUrl);
     await page.waitForTimeout(500);
     stepTimings.urlEntry = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ URL entered in ${stepTimings.urlEntry}`);
 
-    // Step 8: Click Download button
+    // Step 7: Click Download
     stepStart = Date.now();
-    logRequest('INFO', '🔄 Step 8: Clicking Download button...');
-    
-    try {
-      const downloadBtn = await page.getByRole('button', { name: 'Download' });
-      await downloadBtn.click();
-      logRequest('INFO', '✅ Download button clicked using role');
-    } catch (e) {
-      logRequest('WARN', `⚠️ Download button not found, trying alternative...`);
-      const downloadBtn = await page.locator('button:has-text("Download"), [type="submit"]').first();
-      await downloadBtn.click();
-      logRequest('INFO', '✅ Download button clicked using alternative selector');
-    }
-    
+    logRequest('INFO', '🔄 Step 7: Clicking Download button...');
+    const downloadBtn = page.locator('#downloadBtn').getByText('Download');
+    await downloadBtn.click();
     stepTimings.downloadClick = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     logRequest('INFO', `✅ Download button clicked in ${stepTimings.downloadClick}`);
 
-    // Step 9: Wait for the download link to appear
+    // Step 8: Wait for MP4 button
     stepStart = Date.now();
-    logRequest('INFO', '⏳ Step 9: Waiting for download link...');
+    logRequest('INFO', '⏳ Step 8: Waiting for MP4 download option...');
+    await page.waitForTimeout(3000);
+    stepTimings.mp4Wait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+    logRequest('INFO', `✅ MP4 option wait completed in ${stepTimings.mp4Wait}`);
     
-    // First, wait for the result container to appear
-    try {
-      await page.waitForSelector('.ig-media-card, .result, [class*="result"]', { timeout: 15000 });
-      logRequest('INFO', '✅ Result container found');
-    } catch (e) {
-      logRequest('WARN', '⚠️ Result container not found, continuing...');
-    }
+    // Step 9: Click MP4
+    stepStart = Date.now();
+    logRequest('INFO', '🔍 Step 9: Looking for Download MP4 button...');
+    const mp4Btn = page.locator('#btn-mp4').getByText('Download MP4 (Video)');
     
-    // Then try to find the download link
-    let attempts = 0;
-    const maxAttempts = 30;
-    
-    while (!downloadUrl && attempts < maxAttempts) {
-      await page.waitForTimeout(1000);
-      attempts++;
-      
-      if (attempts % 3 === 0) {
-        logRequest('INFO', `⏳ Waiting for download link... (${attempts}s)`);
-        
-        // ✅ Method 1: Look for the exact download button
-        try {
-          const downloadLink = await page.locator('a[href*="fdown.vn/media/ig-stream/"]').first();
-          if (await downloadLink.isVisible({ timeout: 500 })) {
-            const href = await downloadLink.getAttribute('href');
-            if (href && href.includes('fdown.vn/media/ig-stream/')) {
-              if (href.startsWith('/')) {
-                downloadUrl = `https://fdown.vn${href}`;
-              } else if (href.startsWith('http')) {
-                downloadUrl = href;
-              } else {
-                downloadUrl = `https://fdown.vn/media/ig-stream/${href}`;
-              }
-              logRequest('INFO', `✅ Found download link in page: ${downloadUrl.substring(0, 80)}...`);
-              break;
-            }
-          }
-        } catch (e) {}
-        
-        // ✅ Method 2: Look for the Download button with class
-        if (!downloadUrl) {
-          try {
-            const downloadBtn = await page.locator('.ig-media-card__btn, .btn-success, a:has-text("Download")').first();
-            if (await downloadBtn.isVisible({ timeout: 500 })) {
-              const href = await downloadBtn.getAttribute('href');
-              if (href && href.includes('fdown.vn/media/ig-stream/')) {
-                if (href.startsWith('/')) {
-                  downloadUrl = `https://fdown.vn${href}`;
-                } else {
-                  downloadUrl = href;
-                }
-                logRequest('INFO', `✅ Found download button link: ${downloadUrl.substring(0, 80)}...`);
-                break;
-              }
-            }
-          } catch (e) {}
-        }
-        
-        // ✅ Method 3: Check page content for the download URL
-        if (!downloadUrl) {
-          try {
-            const html = await page.content();
-            const matches = html.match(/https?:\/\/fdown\.vn\/media\/ig-stream\/[^\s"']+/gi);
-            if (matches && matches.length > 0) {
-              downloadUrl = matches[0];
-              logRequest('INFO', `✅ Found download URL in HTML: ${downloadUrl.substring(0, 80)}...`);
-              break;
-            }
-          } catch (e) {}
-        }
+    if (await mp4Btn.isVisible({ timeout: 10000 })) {
+      logRequest('INFO', '✅ Found MP4 button, clicking...');
+      await mp4Btn.click();
+      stepTimings.mp4Click = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+      logRequest('INFO', `✅ MP4 download clicked in ${stepTimings.mp4Click}`);
+    } else {
+      logRequest('WARN', '⚠️ MP4 button not found, trying alternative...');
+      const altBtn = page.locator('button:has-text("MP4"), a:has-text("Download MP4")').first();
+      if (await altBtn.isVisible({ timeout: 3000 })) {
+        await altBtn.click();
+        stepTimings.mp4Click = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+        logRequest('INFO', `✅ Alternative MP4 button clicked in ${stepTimings.mp4Click}`);
+      } else {
+        stepTimings.mp4Click = 'failed';
+        logRequest('ERROR', '❌ No MP4 button found');
       }
     }
-    
-    stepTimings.videoWait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+
+    // Step 10: Wait for URL interception
+    stepStart = Date.now();
+    logRequest('INFO', '⏳ Step 10: Waiting for download URL to be intercepted...');
+    let attempts = 0;
+    while (!downloadUrl && attempts < 30) {
+      await page.waitForTimeout(1000);
+      attempts++;
+      if (attempts % 5 === 0) {
+        logRequest('INFO', `⏳ Waiting for download URL... (${attempts}s)`);
+      }
+    }
+    stepTimings.urlWait = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
     
     if (downloadUrl) {
-      logRequest('INFO', `✅ Download URL found in ${stepTimings.videoWait}`);
+      logRequest('INFO', `✅ Download URL intercepted in ${stepTimings.urlWait}`);
     } else {
-      logRequest('WARN', `⚠️ No download URL found after ${attempts}s`);
+      logRequest('WARN', `⚠️ No URL intercepted after ${attempts}s`);
     }
 
-    // Step 10: Final fallback - deep page content check
+    // Step 11: Fallback - Check page content
     if (!downloadUrl) {
       stepStart = Date.now();
-      logRequest('WARN', '⚠️ Step 10: Deep page content check...');
+      logRequest('WARN', '⚠️ Step 11: URL not intercepted, checking page content...');
       
       try {
         const html = await page.content();
-        
-        // Look specifically for fdown.vn/media/ig-stream URLs
-        const patterns = [
-          /https?:\/\/fdown\.vn\/media\/ig-stream\/[^\s"']+/gi,
-          /\/media\/ig-stream\/[^\s"']+/gi
-        ];
-        
-        for (const pattern of patterns) {
-          const matches = html.match(pattern);
-          if (matches && matches.length > 0) {
-            let url = matches[0];
-            if (url.startsWith('/')) {
-              url = `https://fdown.vn${url}`;
-            }
-            downloadUrl = url;
-            stepTimings.htmlCheck = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
-            logRequest('INFO', `✅ Found download URL in HTML: ${downloadUrl.substring(0, 80)}...`);
-            break;
-          }
-        }
-        
-        if (!downloadUrl) {
+        const matches = html.match(/https:\/\/fitydown\.onrender\.com\/download_file\/[a-f0-9]+/gi);
+        if (matches && matches.length > 0) {
+          downloadUrl = matches[0];
+          stepTimings.htmlCheck = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+          logRequest('INFO', `✅ Found FityDown URL in HTML: ${downloadUrl.substring(0, 60)}...`);
+        } else {
           stepTimings.htmlCheck = 'no match';
-          logRequest('WARN', '⚠️ No fdown download URL found in HTML content');
+          logRequest('WARN', '⚠️ No URL found in HTML content');
         }
       } catch (error) {
         stepTimings.htmlCheck = 'error';
@@ -472,9 +376,9 @@ async function downloadViaFdown(instagramUrl) {
       }
     }
 
-    // Step 11: Error if no URL
+    // Step 12: Error if no URL
     if (!downloadUrl) {
-      logRequest('ERROR', '❌ Step 11: Could not find download URL');
+      logRequest('ERROR', '❌ Step 12: Could not find download URL');
       try {
         const screenshotPath = path.join(DEBUG_DIR, `error_${Date.now()}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -485,16 +389,43 @@ async function downloadViaFdown(instagramUrl) {
       throw new Error('Could not find download URL');
     }
 
-    logRequest('INFO', `✅ Download URL captured: ${downloadUrl.substring(0, 80)}...`);
+    logRequest('INFO', `✅ Download URL captured: ${downloadUrl}`);
 
-    // Step 12: Final wait before closing
-    logRequest('INFO', '⏳ Step 12: Waiting 2 seconds before closing...');
-    await page.waitForTimeout(2000);
-    stepTimings.finalWait = '2s';
+    // Step 13: Get caption
+    stepStart = Date.now();
+    logRequest('INFO', '📝 Step 13: Getting caption...');
+    try {
+      const captionEl = await page.locator('.caption, .description, [class*="caption"]').first();
+      if (await captionEl.isVisible({ timeout: 2000 })) {
+        const text = await captionEl.textContent();
+        if (text && text.trim().length > 10 && 
+            !text.includes('Error') && 
+            !text.includes('Download')) {
+          caption = text.trim();
+          stepTimings.captionFetch = ((Date.now() - stepStart) / 1000).toFixed(1) + 's';
+          logRequest('INFO', `✅ Caption found (${caption.length} chars): ${caption.substring(0, 50)}...`);
+        } else {
+          stepTimings.captionFetch = 'empty or invalid';
+          logRequest('INFO', 'ℹ️ No valid caption found');
+        }
+      } else {
+        stepTimings.captionFetch = 'not visible';
+        logRequest('INFO', 'ℹ️ Caption element not visible');
+      }
+    } catch (error) {
+      stepTimings.captionFetch = 'error';
+      logRequest('WARN', `⚠️ Caption fetch error: ${error.message}`);
+    }
+
+    // Step 14: Final wait
+    logRequest('INFO', '⏳ Step 14: Waiting 5 seconds before closing...');
+    await page.waitForTimeout(5000);
+    stepTimings.finalWait = '5s';
 
     // Calculate total time
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     
+    // Log all timings
     logRequest('INFO', '📊 TIMING SUMMARY:', {
       totalTime: `${totalTime}s`,
       steps: stepTimings
@@ -509,10 +440,11 @@ async function downloadViaFdown(instagramUrl) {
       downloadTime: `${totalTime}s`,
       originalUrl: instagramUrl,
       isDirectUrl: true,
-      source: 'fdown_vn',
+      source: 'fitydown',
+      caption: caption || '',
       videoUrl: downloadUrl,
       timings: stepTimings,
-      logs: requestLog.slice(-20)
+      logs: requestLog.slice(-20) // Last 20 log entries
     };
 
   } catch (error) {
@@ -533,30 +465,18 @@ async function downloadViaFdown(instagramUrl) {
 
 // ============== MAIN DOWNLOAD FUNCTION ==============
 
-async function downloadVideo(instagramUrl, pipelineId = null, postId = null, profileUsername = null, shouldDownload = false) {
-  logRequest('INFO', `\n📥 Processing video URL for: ${instagramUrl.substring(0, 60)}...`);
-  logRequest('INFO', `   Pipeline ID: ${pipelineId || 'None'}`);
-  logRequest('INFO', `   Post ID: ${postId || 'None'}`);
-  logRequest('INFO', `   Profile Username: ${profileUsername || 'None'}`);
-  logRequest('INFO', `   Should Download: ${shouldDownload}`);
+async function downloadVideo(instagramUrl) {
+  logRequest('INFO', `\n📥 Processing: ${instagramUrl.substring(0, 60)}...`);
   
   try {
-    const result = await downloadViaFdown(instagramUrl);
+    const result = await downloadViaFitydown(instagramUrl);
     
     if (result && result.success) {
       logRequest('INFO', `✅ Video URL captured!`, { 
         url: result.downloadUrl.substring(0, 50) + '...',
         time: result.downloadTime
       });
-      
-      await sendVideoUrlToVercel(
-        instagramUrl, 
-        result.downloadUrl, 
-        pipelineId, 
-        postId, 
-        profileUsername
-      );
-      
+      await sendToVercel(instagramUrl, result.downloadUrl, result.caption || '');
       return result;
     }
     
@@ -581,7 +501,7 @@ app.post('/api/download', async (req, res) => {
   });
   
   try {
-    const { url, pipeline_id, post_id, profile_username, download } = req.body;
+    const { url } = req.body;
     
     if (!url) {
       activeRequests--;
@@ -604,16 +524,13 @@ app.post('/api/download', async (req, res) => {
     }
 
     logRequest('INFO', `[${requestId}] Processing URL: ${url.substring(0, 60)}...`);
-    logRequest('INFO', `[${requestId}] Pipeline ID: ${pipeline_id || 'None'}`);
-    logRequest('INFO', `[${requestId}] Post ID: ${post_id || 'None'}`);
-    logRequest('INFO', `[${requestId}] Profile Username: ${profile_username || 'None'}`);
-    logRequest('INFO', `[${requestId}] Download: ${download || false}`);
     
-    const result = await downloadVideo(url, pipeline_id, post_id, profile_username, download === true);
+    const result = await downloadVideo(url);
     
     logRequest('INFO', `[${requestId}] ✅ Download successful`, {
       url: result.downloadUrl.substring(0, 50) + '...',
-      time: result.downloadTime
+      time: result.downloadTime,
+      hasCaption: !!result.caption
     });
     
     res.json({
@@ -621,10 +538,7 @@ app.post('/api/download', async (req, res) => {
       requestId: requestId,
       data: {
         ...result,
-        webhook_sent: true,
-        pipeline_id: pipeline_id,
-        post_id: post_id,
-        profile_username: profile_username
+        webhook_sent: true
       }
     });
 
@@ -644,6 +558,7 @@ app.post('/api/download', async (req, res) => {
 
 // ============== LOGGING ENDPOINTS ==============
 
+// Get recent logs
 app.get('/api/logs', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const logs = requestLog.slice(-limit);
@@ -655,6 +570,7 @@ app.get('/api/logs', (req, res) => {
   });
 });
 
+// Get request stats
 app.get('/api/stats', (req, res) => {
   res.json({
     status: 'ok',
@@ -668,6 +584,7 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+// Health check with details
 app.get('/health', async (req, res) => {
   const isRender = process.env.RENDER === 'true' || !!process.env.RENDER;
   res.json({
@@ -687,12 +604,15 @@ app.get('/health', async (req, res) => {
   });
 });
 
+// Serve downloaded files
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
+// Serve frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// 404 handler
 app.use((req, res) => {
   logRequest('WARN', `404: ${req.method} ${req.url}`);
   res.status(404).json({
@@ -701,6 +621,7 @@ app.use((req, res) => {
   });
 });
 
+// Error handler
 app.use((err, req, res, next) => {
   logRequest('ERROR', `Server error: ${err.message}`);
   logRequest('ERROR', `Stack: ${err.stack}`);
@@ -755,18 +676,15 @@ process.on('uncaughtException', (error) => {
   logRequest('ERROR', `Stack: ${error.stack}`);
 });
 
-// ============== START SERVER ==============
-
+// Start server
 app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
-  console.log('🚀 Instagram Video URL Service (fdown.vn)');
+  console.log('🚀 Instagram Video Downloader (instadl.fitydown.com)');
   console.log('═'.repeat(60));
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📡 Mode: ${isRender ? 'Render (headless)' : 'Local (visible)'}`);
   console.log(`🕐 Started: ${new Date().toISOString()}`);
   console.log(`📋 Logging enabled - ${MAX_LOG_ENTRIES} entries retained`);
-  console.log(`📁 Downloads directory: ${DOWNLOAD_DIR}`);
-  console.log(`📸 Debug directory: ${DEBUG_DIR}`);
   console.log('═'.repeat(60) + '\n');
 });
 
